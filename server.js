@@ -9,41 +9,75 @@ const io = new Server(server, {
   cors: { origin: "*" }
 });
 
-function updateOnline() {
-  io.emit("online count", io.of("/").sockets.size);
+const users = {};          // username -> socket.id
+const friends = {};        // username -> Set()
+const requests = {};       // username -> [from]
+
+function sendOnline() {
+  io.emit("users", Object.keys(users));
 }
 
 io.on("connection", (socket) => {
 
-  updateOnline();
-
   socket.on("join", (username) => {
+
+    if (!username) return;
+
     socket.username = username;
-    socket.emit("system", `Welcome ${username}`);
+    users[username] = socket.id;
+
+    if (!friends[username]) friends[username] = new Set();
+
+    sendOnline();
   });
 
-  // FIXED CHAT
-  socket.on("chat message", (data) => {
-
-    if (!data?.username || !data?.msg) return;
+  // PUBLIC CHAT
+  socket.on("chat message", (msg) => {
+    if (!socket.username) return;
 
     io.emit("chat message", {
-      username: data.username,
-      msg: data.msg
+      user: socket.username,
+      msg
     });
-
   });
 
-  socket.on("request online", updateOnline);
+  // FRIEND REQUEST
+  socket.on("friend request", (to) => {
+    const from = socket.username;
+    if (!from || !users[to]) return;
+
+    if (!requests[to]) requests[to] = [];
+    requests[to].push(from);
+
+    io.to(users[to]).emit("friend request", from);
+  });
+
+  // ACCEPT FRIEND
+  socket.on("friend accept", (from) => {
+    const to = socket.username;
+
+    friends[to].add(from);
+    friends[from].add(to);
+
+    io.to(users[to]).emit("friend added", from);
+    io.to(users[from]).emit("friend added", to);
+  });
+
+  // PRIVATE MESSAGE
+  socket.on("dm", ({ to, msg }) => {
+    const from = socket.username;
+    if (!users[to]) return;
+
+    io.to(users[to]).emit("dm", { from, msg });
+  });
 
   socket.on("disconnect", () => {
-    setTimeout(updateOnline, 50);
+    if (socket.username) {
+      delete users[socket.username];
+      sendOnline();
+    }
   });
 
 });
 
-const PORT = process.env.PORT || 3000;
-
-server.listen(PORT, "0.0.0.0", () => {
-  console.log("Server running on port " + PORT);
-});
+server.listen(3000, () => console.log("server running"));
