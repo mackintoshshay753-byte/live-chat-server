@@ -156,7 +156,8 @@ io.on('connection', (socket) => {
       messageHistory.push(messageObj);
       if (messageHistory.length > MAX_HISTORY) messageHistory.shift();
 
-      io.emit('chat message', messageObj);
+      socket.emit('chat message', messageObj); // back to sender only
+socket.broadcast.emit('chat message', messageObj); // everyone else
     } catch (err) {
       console.error('❌ Message error:', err.message);
       socket.emit('system', "❌ Failed to send message");
