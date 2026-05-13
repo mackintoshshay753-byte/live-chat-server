@@ -50,8 +50,6 @@ const io = new Server(server, {
 
 // --------------------------
 const onlineUsers = new Map();
-const messageHistory = [];
-const MAX_HISTORY = 100;
 
 function sanitizeInput(input) {
   if (typeof input !== 'string') return '';
@@ -66,7 +64,6 @@ io.on('connection', (socket) => {
 
   console.log("Connected:", socket.id);
 
-  socket.emit('message history', messageHistory);
   socket.emit('online count', onlineUsers.size);
 
   const updateOnline = () => {
@@ -91,26 +88,22 @@ io.on('connection', (socket) => {
 
   // MESSAGE
   socket.on('chat message', (data) => {
-    const username = onlineUsers.get(socket.id);
-    if (!username) return;
+  const username = onlineUsers.get(socket.id);
+  if (!username) return;
 
-    if (!data?.msg) return;
+  if (!data?.msg) return;
 
-    const msg = sanitizeInput(data.msg);
-    if (msg.length < 1 || msg.length > 500) return;
+  const msg = sanitizeInput(data.msg);
+  if (msg.length < 1 || msg.length > 500) return;
 
-    const messageObj = {
-      username,
-      msg,
-      timestamp: new Date().toISOString()
-    };
+  const messageObj = {
+    username,
+    msg,
+    timestamp: new Date().toISOString()
+  };
 
-    messageHistory.push(messageObj);
-    if (messageHistory.length > MAX_HISTORY) messageHistory.shift();
-
-    // ✅ ONLY send to others
-    socket.broadcast.emit('chat message', messageObj);
-  });
+  socket.broadcast.emit('chat message', messageObj);
+});
 
   // TYPING
   socket.on('typing', () => {
