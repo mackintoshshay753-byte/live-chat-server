@@ -18,21 +18,30 @@ io.on("connection", (socket) => {
   updateOnline();
 
   socket.on("join", (username) => {
-    socket.username = username;
-    socket.emit("system", `Welcome ${username}`);
-  });
+  username = String(username || "").trim();
+
+  if (!username) {
+    socket.emit("system", "Invalid username");
+    return;
+  }
+
+  socket.username = username.slice(0, 20);
+  socket.emit("system", `Welcome ${socket.username}`);
+});
 
   // FIXED CHAT
   socket.on("chat message", (data) => {
+  if (!socket.username) return; // must join first
 
-    if (!data?.username || !data?.msg) return;
+  const msg = typeof data?.msg === "string"
+    ? data.msg
+    : JSON.stringify(data?.msg);
 
-    io.emit("chat message", {
-      username: data.username,
-      msg: data.msg
-    });
-
+  io.emit("chat message", {
+    username: socket.username, // ALWAYS trusted server value
+    msg
   });
+});
 
   socket.on("request online", updateOnline);
 
