@@ -6,42 +6,38 @@ const app = express();
 const server = http.createServer(app);
 
 const io = new Server(server, {
-  cors: { origin: "*" },
-  transports: ["websocket", "polling"]
+  cors: { origin: "*" }
 });
 
-function emitOnline() {
-  const count = io.of("/").sockets.size; // 🔥 REAL LIVE COUNT
-  io.emit("online count", count);
-  console.log("ONLINE:", count);
+function updateOnline() {
+  io.emit("online count", io.of("/").sockets.size);
 }
 
 io.on("connection", (socket) => {
 
-  console.log("user connected");
-
-  // send updated count immediately
-  emitOnline();
+  updateOnline();
 
   socket.on("join", (username) => {
     socket.username = username;
     socket.emit("system", `Welcome ${username}`);
   });
 
-  socket.on("chat message", (msg) => {
+  // FIXED CHAT
+  socket.on("chat message", (data) => {
+
+    if (!data?.username || !data?.msg) return;
+
     io.emit("chat message", {
-      username: socket.username || "Anonymous",
-      msg
+      username: data.username,
+      msg: data.msg
     });
+
   });
 
-  socket.on("disconnect", () => {
-    console.log("user disconnected");
+  socket.on("request online", updateOnline);
 
-    // small delay helps Render + socket cleanup
-    setTimeout(() => {
-      emitOnline();
-    }, 50);
+  socket.on("disconnect", () => {
+    setTimeout(updateOnline, 50);
   });
 
 });
