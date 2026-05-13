@@ -9,75 +9,116 @@ const io = new Server(server, {
   cors: { origin: "*" }
 });
 
-const users = {};          // username -> socket.id
-const friends = {};        // username -> Set()
-const requests = {};       // username -> [from]
+const users = {}; 
+// username -> socket.id
 
-function sendOnline() {
-  io.emit("users", Object.keys(users));
+const friends = {}; 
+// username -> [friend usernames]
+
+const requests = {}; 
+// username -> [who sent request]
+
+function onlineCount() {
+  return Object.keys(users).length;
+}
+
+function emitOnline() {
+  io.emit("online count", onlineCount());
+}
+
+// helper send notification
+function notify(socketId, msg) {
+  io.to(socketId).emit("notify", msg);
 }
 
 io.on("connection", (socket) => {
 
   socket.on("join", (username) => {
-
     if (!username) return;
 
     socket.username = username;
     users[username] = socket.id;
 
-    if (!friends[username]) friends[username] = new Set();
+    if (!friends[username]) friends[username] = [];
+    if (!requests[username]) requests[username] = [];
 
-    sendOnline();
+    emitOnline();
+
+    socket.emit("friends list", friends[username]);
+    socket.emit("friend requests", requests[username]);
   });
 
-  // PUBLIC CHAT
+  // public chat
   socket.on("chat message", (msg) => {
     if (!socket.username) return;
 
     io.emit("chat message", {
-      user: socket.username,
+      username: socket.username,
       msg
     });
   });
 
-  // FRIEND REQUEST
-  socket.on("friend request", (to) => {
+  // friend request
+  socket.on("friend request", (toUser) => {
+    const from = socket.username;
+    if (!from || !users[toUser]) return;
+
+    if (!requests[toUser]) requests[toUser] = [];
+
+    if (!requests[toUser].includes(from)) {
+      requests[toUser].push(from);
+    }
+
+    notify(users[toUser], `${from} sent you a friend request`);
+    io.to(users[toUser]).emit("friend requests", requests[toUser]);
+  });
+
+  // accept friend
+  socket.on("accept friend", (fromUser) => {
+    const me = socket.username;
+    if (!me) return;
+
+    friends[me].push(fromUser);
+    friends[fromUser].push(me);
+
+    requests[me] = requests[me].filter(u => u !== fromUser);
+
+    io.to(users[me]).emit("friends list", friends[me]);
+    io.to(users[fromUser]).emit("friends list", friends[fromUser]);
+  });
+
+  // decline friend
+  socket.on("decline friend", (fromUser) => {
+    const me = socket.username;
+    if (!me) return;
+
+    requests[me] = requests[me].filter(u => u !== fromUser);
+
+    socket.emit("friend requests", requests[me]);
+  });
+
+  // private message
+  socket.on("private message", ({ to, msg }) => {
     const from = socket.username;
     if (!from || !users[to]) return;
 
-    if (!requests[to]) requests[to] = [];
-    requests[to].push(from);
+    io.to(users[to]).emit("private message", {
+      from,
+      msg
+    });
 
-    io.to(users[to]).emit("friend request", from);
-  });
-
-  // ACCEPT FRIEND
-  socket.on("friend accept", (from) => {
-    const to = socket.username;
-
-    friends[to].add(from);
-    friends[from].add(to);
-
-    io.to(users[to]).emit("friend added", from);
-    io.to(users[from]).emit("friend added", to);
-  });
-
-  // PRIVATE MESSAGE
-  socket.on("dm", ({ to, msg }) => {
-    const from = socket.username;
-    if (!users[to]) return;
-
-    io.to(users[to]).emit("dm", { from, msg });
+    socket.emit("private message", {
+      from,
+      msg
+    });
   });
 
   socket.on("disconnect", () => {
     if (socket.username) {
       delete users[socket.username];
-      sendOnline();
     }
+    emitOnline();
   });
-
 });
 
-server.listen(3000, () => console.log("server running"));
+server.listen(3000, () => console.log("Server running"));
