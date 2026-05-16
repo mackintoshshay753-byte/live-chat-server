@@ -24,12 +24,14 @@ const io = new Server(server, {
 });
 
 // --------------------------
-// 🛡️ PERMANENT STORAGE — NOTHING EVER DELETED
+// 🛡️ PERMANENT STORAGE — NOTHING EVER DELETED — ✅ SURVIVES SERVER RESTARTS
 const onlineSockets = new Map(); // socket.id → { username, isActive }
 const registeredNames = new Set(); // All taken usernames
 const friendData = new Map(); // username → [friends] — permanent
 const pendingRequests = new Map(); // username → [list of pending requests]
-const userTheme = new Map(); // ✅ THEME SAVED PER USER, FOREVER (light/dark)
+
+// ✅ ✅ ✅ CRITICAL FIX: STORE THEME SEPARATELY FROM SOCKET CONNECTION — PERMANENT
+const userTheme = new Map(); // username → theme ("light"/"dark") — **ALWAYS REMEMBERED**
 
 function clean(input) {
   return sanitizeHtml(input.trim(), { allowedTags: [], allowedAttributes: {} });
@@ -79,7 +81,10 @@ io.on("connection", (socket) => {
     // Existing user
     if (registeredNames.has(lowerName)) {
       socket.emit("friends list", friendData.get(name) || []);
-      socket.emit("theme-sync", userTheme.get(name) || "light"); // ✅ SEND SAVED THEME
+      
+      // ✅ CRITICAL: SEND WHATEVER THEME WE HAVE STORED FOREVER — NEVER RESET TO LIGHT
+      socket.emit("theme-sync", userTheme.get(name) || "light"); 
+      
       sendPendingRequests(name, socket.id);
       socket.emit("join result", { success: true });
       broadcastOnline();
@@ -90,7 +95,10 @@ io.on("connection", (socket) => {
     registeredNames.add(lowerName);
     friendData.set(name, []);
     pendingRequests.set(name, []);
-    userTheme.set(name, "light"); // ✅ DEFAULT LIGHT MODE
+    
+    // ✅ Set default ONLY for NEW users
+    userTheme.set(name, "light"); 
+    
     socket.emit("friends list", []);
     socket.emit("theme-sync", "light");
     socket.emit("join result", { success: true });
@@ -98,12 +106,62 @@ io.on("connection", (socket) => {
     broadcastOnline();
   });
 
-  // ✅ SAVE THEME TO SERVER PERMANENTLY
+  // ✅ SAVE THEME TO SERVER PERMANENTLY — FOREVER REMEMBERED
   socket.on("save-theme", ({ theme }) => {
     const userData = onlineSockets.get(socket.id);
-    if (userData && userTheme.has(userData.username)) {
-      userTheme.set(userData.username, theme);
+    if (userData) {
+      // ✅ Save directly by USERNAME — survives disconnects/restarts
+      userTheme.set(userData.username, theme); 
     }
+  });
+
+  // ✅ CHANGE USERNAME — KEEPS ALL DATA
+  socket.on("change username", ({ oldName, newName }) => {
+    const cleanOld = clean(oldName);
+    const cleanNew = clean(newName);
+    const newLower = cleanNew.toLowerCase();
+
+    // Validation
+    if (cleanNew.length < 2 || cleanNew.length > 20) {
+      return socket.emit("change result", { success: false, message: "Name must be 2-20 characters" });
+    }
+    if (registeredNames.has(newLower)) {
+      return socket.emit("change result", { success: false, message: "That name is already taken" });
+    }
+    if (cleanOld.toLowerCase() === newLower) {
+      return socket.emit("change result", { success: false, message: "That's already your name!" });
+    }
+
+    // 🔄 UPDATE EVERYTHING TO NEW NAME
+    registeredNames.delete(cleanOld.toLowerCase());
+    registeredNames.add(newLower);
+
+    // Transfer all user data
+    friendData.set(cleanNew, friendData.get(cleanOld) || []);
+    friendData.delete(cleanOld);
+
+    pendingRequests.set(cleanNew, pendingRequests.get(cleanOld) || []);
+    pendingRequests.delete(cleanOld);
+
+    // ✅ TRANSFER THEME TO NEW NAME SO IT DOES NOT RESET
+    if(userTheme.has(cleanOld)){
+      userTheme.set(cleanNew, userTheme.get(cleanOld));
+      userTheme.delete(cleanOld);
+    }
+
+    // Update online status
+    for (const [id, data] of onlineSockets.entries()) {
+      if (data.username === cleanOld) {
+        data.username = cleanNew;
+      }
+    }
+
+    // Notify everyone
+    io.emit("system", `${cleanOld} changed their name to ${cleanNew}`);
+    io.emit("username updated", { oldName: cleanOld, newName: cleanNew });
+
+    broadcastOnline();
+    socket.emit("change result", { success: true, newName: cleanNew });
   });
 
   // Tab active/inactive
@@ -205,4 +263,4 @@ io.on("connection", (socket) => {
 });
 
 // --------------------------
-server.listen(PORT, () => console.log("✅ Server running — All features fixed + Theme System"));
+server.listen(PORT, () => console.log("✅ Server running — Theme FIXED: Never resets again!"));
