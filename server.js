@@ -95,7 +95,7 @@ io.on("connection", (socket) => {
   });
   socket.on("stop typing", () => socket.broadcast.emit("stop typing"));
 
-  // FRIEND SYSTEM — PERMANENT
+  // FRIEND SYSTEM — PERMANENT ADD & REMOVE
   socket.on("friend request", ({ from, to }) => {
     const targetId = [...onlineSockets.entries()].find(([_,u]) => u === to)?.[0];
     if (!targetId) return socket.emit("system", `⚠️ ${to} is offline`);
@@ -103,17 +103,27 @@ io.on("connection", (socket) => {
   });
 
   socket.on("friend accept", ({ user, from }) => {
-    // ✅ ADD — NEVER REMOVE
+    // ✅ ADD — PERMANENT
     if (!friendData.get(user).includes(from)) friendData.get(user).push(from);
     if (!friendData.get(from).includes(user)) friendData.get(from).push(user);
 
-    // Notify both
     io.emit("friend added", { friend: from, forUser: user });
     io.emit("friend added", { friend: user, forUser: from });
 
-    // Send updated permanent lists
     io.emit("friends list", friendData.get(user));
     io.emit("friends list", friendData.get(from));
+  });
+
+  socket.on("unfriend", ({ user, friend }) => {
+    // ✅ REMOVE — PERMANENT
+    if (friendData.has(user)) friendData.set(user, friendData.get(user).filter(f => f !== friend));
+    if (friendData.has(friend)) friendData.set(friend, friendData.get(friend).filter(f => f !== user));
+
+    io.emit("friend removed", { friend: friend, forUser: user });
+    io.emit("friend removed", { friend: user, forUser: friend });
+
+    io.emit("friends list", friendData.get(user));
+    io.emit("friends list", friendData.get(friend));
   });
 
   socket.on("friend decline", ({ user, from }) => {
