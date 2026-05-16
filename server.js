@@ -33,16 +33,11 @@ const pendingRequests = new Map(); // username → [list of pending requests]
 // ✅ ✅ ✅ CRITICAL FIX: STORE THEME SEPARATELY FROM SOCKET CONNECTION — PERMANENT
 const userTheme = new Map(); // username → theme ("light"/"dark") — **ALWAYS REMEMBERED**
 
-// 🆕 UNLIMITED USER ID SYSTEM — STARTS AT 1, GOES FOREVER
-let nextUserId = 1; 
-const userAccounts = new Map(); // userid → { id, username, joined, online }
-
-// --------------------------
-// 🧰 HELPER FUNCTIONS
 function clean(input) {
   return sanitizeHtml(input.trim(), { allowedTags: [], allowedAttributes: {} });
 }
 
+// Get users with at least 1 active tab open
 function getOnlineUsers() {
   const activeUsers = new Set();
   for (const [_, data] of onlineSockets.entries()) {
@@ -55,6 +50,7 @@ function broadcastOnline() {
   io.emit("online list", getOnlineUsers());
 }
 
+// Send all saved requests immediately when user joins/returns
 function sendPendingRequests(username, socketId) {
   if (pendingRequests.has(username)) {
     pendingRequests.get(username).forEach(fromUser => {
@@ -64,7 +60,6 @@ function sendPendingRequests(username, socketId) {
 }
 
 // --------------------------
-// 🚦 SOCKET LOGIC
 io.on("connection", (socket) => {
   console.log("Connected:", socket.id);
 
@@ -72,7 +67,7 @@ io.on("connection", (socket) => {
     socket.emit("online list", getOnlineUsers());
   });
 
-  // ✅ JOIN — NOW WITH UNIQUE USER ID
+  // JOIN — load friends + pending requests + ✅ THEME
   socket.on("join", (rawName) => {
     const name = clean(rawName);
     const lowerName = name.toLowerCase();
@@ -96,24 +91,17 @@ io.on("connection", (socket) => {
       return;
     }
 
-    // ✅ NEW USER — ASSIGN UNIQUE ID #1, #2, #3... NO LIMIT
-    const newId = nextUserId++;
+    // New user
     registeredNames.add(lowerName);
     friendData.set(name, []);
     pendingRequests.set(name, []);
-    userTheme.set(name, "light"); // Set default ONLY for NEW users
-
-    // ✅ SAVE ACCOUNT DATA FOR PROFILE PAGES
-    userAccounts.set(newId, {
-      id: newId,
-      username: name,
-      joined: new Date().toLocaleDateString(),
-      online: true
-    });
+    
+    // ✅ Set default ONLY for NEW users
+    userTheme.set(name, "light"); 
     
     socket.emit("friends list", []);
     socket.emit("theme-sync", "light");
-    socket.emit("join result", { success: true, userId: newId }); // Send ID back to client
+    socket.emit("join result", { success: true });
     socket.broadcast.emit("system", `${name} joined`);
     broadcastOnline();
   });
@@ -127,7 +115,7 @@ io.on("connection", (socket) => {
     }
   });
 
-  // ✅ CHANGE USERNAME — KEEPS ALL DATA + UPDATES PROFILE
+  // ✅ CHANGE USERNAME — KEEPS ALL DATA
   socket.on("change username", ({ oldName, newName }) => {
     const cleanOld = clean(oldName);
     const cleanNew = clean(newName);
@@ -161,13 +149,6 @@ io.on("connection", (socket) => {
       userTheme.delete(cleanOld);
     }
 
-    // ✅ UPDATE USERNAME IN PROFILE RECORD
-    for (const [id, acc] of userAccounts.entries()) {
-      if (acc.username === cleanOld) {
-        acc.username = cleanNew;
-      }
-    }
-
     // Update online status
     for (const [id, data] of onlineSockets.entries()) {
       if (data.username === cleanOld) {
@@ -183,18 +164,6 @@ io.on("connection", (socket) => {
     socket.emit("change result", { success: true, newName: cleanNew });
   });
 
-  // ✅ NEW: HANDLE PROFILE REQUEST FROM /users/X/profile
-  socket.on("get profile", (userId) => {
-    const uid = Number(userId);
-    if (!userAccounts.has(uid)) {
-      return socket.emit("profile data", { error: true });
-    }
-    const acc = userAccounts.get(uid);
-    // Update live online status
-    acc.online = getOnlineUsers().includes(acc.username);
-    socket.emit("profile data", acc);
-  });
-
   // Tab active/inactive
   socket.on("activity change", ({ active }) => {
     if (onlineSockets.has(socket.id)) {
@@ -203,18 +172,12 @@ io.on("connection", (socket) => {
     }
   });
 
-  // CHAT — NOW SENDS USER ID FOR PROFILE LINKS
+  // CHAT
   socket.on("chat message", (data) => {
     const userData = onlineSockets.get(socket.id);
     if (!userData || !data.text) return;
-    // Find their ID
-    let theirId = null;
-    for (const [id, acc] of userAccounts.entries()) {
-      if (acc.username === userData.username) theirId = id;
-    }
     io.emit("chat message", {
       from: userData.username,
-      fromId: theirId,
       text: clean(data.text),
       time: new Date().toISOString()
     });
@@ -237,6 +200,8 @@ io.on("connection", (socket) => {
         return;
       }
     }
+
+    // Save permanently if offline
     if (!pendingRequests.get(to).includes(from)) {
       pendingRequests.get(to).push(from);
       socket.emit("system", `📨 Request saved — ${to} will see it when they return`);
@@ -245,30 +210,45 @@ io.on("connection", (socket) => {
 
   // ACCEPT REQUEST
   socket.on("friend accept", ({ user, from }) => {
-    if (pendingRequests.has(user)) pendingRequests.set(user, pendingRequests.get(user).filter(f => f !== from));
+    // Remove from pending
+    if (pendingRequests.has(user)) {
+      pendingRequests.set(user, pendingRequests.get(user).filter(f => f !== from));
+    }
+
+    // Save friendship
     if (!friendData.has(user)) friendData.set(user, []);
     if (!friendData.has(from)) friendData.set(from, []);
     if (!friendData.get(user).includes(from)) friendData.get(user).push(from);
     if (!friendData.get(from).includes(user)) friendData.get(from).push(user);
+
     io.emit("friend added", { friend: from, forUser: user });
     io.emit("friend added", { friend: user, forUser: from });
+
     io.to(user).emit("friends list", friendData.get(user));
     io.to(from).emit("friends list", friendData.get(from));
   });
 
   // ✅ DECLINE REQUEST — notify sender & fully remove so you can send again
   socket.on("friend decline", ({ user, from }) => {
-    if (pendingRequests.has(user)) pendingRequests.set(user, pendingRequests.get(user).filter(f => f !== from));
+    // Remove from pending list completely
+    if (pendingRequests.has(user)) {
+      pendingRequests.set(user, pendingRequests.get(user).filter(f => f !== from));
+    }
+    // Tell sender they were declined
     const senderSocket = [...onlineSockets.entries()].find(([_,u]) => u.username === from)?.[0];
-    if (senderSocket) io.to(senderSocket).emit("request declined", { by: user });
+    if (senderSocket) {
+      io.to(senderSocket).emit("request declined", { by: user });
+    }
   });
 
   // UNFRIEND
   socket.on("unfriend", ({ user, friend }) => {
     if (friendData.has(user)) friendData.set(user, friendData.get(user).filter(f => f !== friend));
-    if (friendData.has(friend)) friendData.set(friend.get(user).filter(f => f !== user));
+    if (friendData.has(friend)) friendData.set(friend).filter(f => f !== user);
+
     io.emit("friend removed", { friend, forUser: user });
     io.emit("friend removed", { friend: user, forUser: friend });
+
     io.to(user).emit("friends list", friendData.get(user));
     io.to(friend).emit("friends list", friendData.get(friend));
   });
@@ -283,4 +263,4 @@ io.on("connection", (socket) => {
 });
 
 // --------------------------
-server.listen(PORT, () => console.log("✅ Server running — Theme FIXED + User ID System Ready!"));
+server.listen(PORT, () => console.log("✅ Server running — Theme FIXED: Never resets again!"));
