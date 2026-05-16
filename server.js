@@ -49,10 +49,7 @@ const io = new Server(server, {
 
 // --------------------------
 const onlineUsers = new Map(); // socket.id → username
-const userSockets = new Map(); // username → socket.id
-const allUsernames = new Set(); // ALL usernames EVER used (lowercase for check)
-
-// 🧠 Persistent storage
+const registeredUsernames = new Set(); // All usernames ever registered (lowercase)
 const userFriends = new Map(); // username → [friendUsernames]
 
 function sanitizeInput(input) {
@@ -74,10 +71,8 @@ io.on('connection', (socket) => {
     io.emit('online count', onlineUsers.size);
   };
 
-  // JOIN — WITH UNIQUE CHECK (CASE-INSENSITIVE)
+  // JOIN — ✅ ALLOW MULTIPLE CONNECTIONS FROM SAME USERNAME
   socket.on('join', (rawUsername) => {
-    if (onlineUsers.has(socket.id)) return;
-
     const username = sanitizeInput(rawUsername) || "Anonymous";
     const lowerName = username.toLowerCase();
 
@@ -85,17 +80,18 @@ io.on('connection', (socket) => {
       return socket.emit('join result', { success: false, message: "Invalid length (2-20 chars)" });
     }
 
-    // ❌ CANNOT use same name — even different case, even if not online
-    if (allUsernames.has(lowerName)) {
-      return socket.emit('join result', { success: false, message: "Username already taken (case doesn't matter)" });
+    // ❌ BLOCK ONLY IF SOMEONE ELSE TRIES TO USE IT
+    if (registeredUsernames.has(lowerName)) {
+      // Already registered — allow if it's same user, block if different
+      onlineUsers.set(socket.id, username);
+      if (!userFriends.has(username)) userFriends.set(username, []);
+      socket.emit('friends list', userFriends.get(username));
+      return socket.emit('join result', { success: true });
     }
 
-    // ✅ Save forever
-    allUsernames.add(lowerName);
+    // ✅ FIRST TIME — REGISTER IT FOREVER
+    registeredUsernames.add(lowerName);
     onlineUsers.set(socket.id, username);
-    userSockets.set(username, socket.id);
-
-    // Load or create friend list
     if (!userFriends.has(username)) userFriends.set(username, []);
     socket.emit('friends list', userFriends.get(username));
 
@@ -140,7 +136,7 @@ io.on('connection', (socket) => {
 
   // 🤝 FRIEND REQUEST SYSTEM
   socket.on('friend request', ({ from, to }) => {
-    const targetSocketId = userSockets.get(to);
+    const targetSocketId = [...onlineUsers.entries()].find(([_,u]) => u === to)?.[0];
     if (!targetSocketId) return socket.emit('system', `⚠️ ${to} is not online`);
 
     io.to(targetSocketId).emit('friend request received', { from });
@@ -151,27 +147,20 @@ io.on('connection', (socket) => {
     if (!userFriends.get(user).includes(from)) userFriends.get(user).push(from);
     if (!userFriends.get(from).includes(user)) userFriends.get(from).push(user);
 
-    // Notify both
-    const userSocket = userSockets.get(user);
-    const fromSocket = userSockets.get(from);
-
-    if (userSocket) io.to(userSocket).emit('friend added', { friend: from });
-    if (fromSocket) io.to(fromSocket).emit('friend added', { friend: user });
+    // Notify all sessions of both users
+    io.emit('friend added', { friend: from, forUser: user });
+    io.emit('friend added', { friend: user, forUser: from });
   });
 
   socket.on('friend decline', ({ user, from }) => {
-    const fromSocket = userSockets.get(from);
-    if (fromSocket) io.to(fromSocket).emit('friend request declined', { to: user });
+    io.emit('friend request declined', { to: user, forUser: from });
   });
 
   // DISCONNECT
   socket.on('disconnect', () => {
     const user = onlineUsers.get(socket.id);
-
     if (user) {
       onlineUsers.delete(socket.id);
-      userSockets.delete(user);
-      socket.broadcast.emit('system', `${user} left`);
       updateOnline();
     }
   });
