@@ -50,7 +50,7 @@ const io = new Server(server, {
 // --------------------------
 const onlineUsers = new Map(); // socket.id → username
 const registeredUsernames = new Set(); // All usernames ever registered (lowercase)
-const userFriends = new Map(); // username → [friendUsernames]
+const userFriends = new Map(); // ✅ PERMANENT storage: username → [friend names] — NEVER cleared
 
 function sanitizeInput(input) {
   if (typeof input !== 'string') return '';
@@ -60,10 +60,15 @@ function sanitizeInput(input) {
   });
 }
 
-// Count UNIQUE usernames currently online
-function getUniqueOnlineCount() {
-  const unique = new Set(Array.from(onlineUsers.values()));
-  return unique.size;
+// Get list of unique usernames currently online
+function getUniqueOnlineUsers() {
+  return [...new Set(Array.from(onlineUsers.values()))];
+}
+
+// Send online status update to everyone
+function broadcastOnlineStatus() {
+  const list = getUniqueOnlineUsers();
+  io.emit('online update', list);
 }
 
 // --------------------------
@@ -71,11 +76,7 @@ io.on('connection', (socket) => {
 
   console.log("Connected:", socket.id);
 
-  socket.emit('online count', getUniqueOnlineCount());
-
-  const updateOnline = () => {
-    io.emit('online count', getUniqueOnlineCount());
-  };
+  socket.emit('online update', getUniqueOnlineUsers());
 
   // JOIN — ✅ ALLOW MULTIPLE CONNECTIONS FROM SAME USERNAME
   socket.on('join', (rawUsername) => {
@@ -89,22 +90,22 @@ io.on('connection', (socket) => {
     // ❌ BLOCK ONLY IF SOMEONE ELSE TRIES TO USE IT
     if (registeredUsernames.has(lowerName)) {
       onlineUsers.set(socket.id, username);
-      if (!userFriends.has(username)) userFriends.set(username, []);
-      socket.emit('friends list', userFriends.get(username));
+      // ✅ Always send saved friends list — NEVER empty
+      socket.emit('friends list', userFriends.get(username) || []);
       socket.emit('join result', { success: true });
-      updateOnline();
+      broadcastOnlineStatus();
       return;
     }
 
     // ✅ FIRST TIME — REGISTER IT FOREVER
     registeredUsernames.add(lowerName);
     onlineUsers.set(socket.id, username);
-    if (!userFriends.has(username)) userFriends.set(username, []);
-    socket.emit('friends list', userFriends.get(username));
+    userFriends.set(username, []); // Create permanent empty list
+    socket.emit('friends list', []);
 
     socket.emit('join result', { success: true });
     socket.broadcast.emit('system', `${username} joined`);
-    updateOnline();
+    broadcastOnlineStatus();
   });
 
   // MESSAGE
@@ -138,7 +139,7 @@ io.on('connection', (socket) => {
 
   // ONLINE
   socket.on('request online', () => {
-    socket.emit('online count', getUniqueOnlineCount());
+    socket.emit('online update', getUniqueOnlineUsers());
   });
 
   // 🤝 FRIEND REQUEST SYSTEM
@@ -150,13 +151,17 @@ io.on('connection', (socket) => {
   });
 
   socket.on('friend accept', ({ user, from }) => {
-    // Add both ways
+    // ✅ ADD FRIEND PERMANENTLY — NEVER REMOVED
     if (!userFriends.get(user).includes(from)) userFriends.get(user).push(from);
     if (!userFriends.get(from).includes(user)) userFriends.get(from).push(user);
 
     // Notify all sessions of both users
     io.emit('friend added', { friend: from, forUser: user });
     io.emit('friend added', { friend: user, forUser: from });
+    
+    // Send updated lists
+    io.emit('friends list', userFriends.get(user));
+    io.emit('friends list', userFriends.get(from));
   });
 
   socket.on('friend decline', ({ user, from }) => {
@@ -168,7 +173,7 @@ io.on('connection', (socket) => {
     const user = onlineUsers.get(socket.id);
     if (user) {
       onlineUsers.delete(socket.id);
-      updateOnline();
+      broadcastOnlineStatus(); // Only update online status — DO NOT touch friends!
     }
   });
 });
