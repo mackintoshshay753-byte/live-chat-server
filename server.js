@@ -29,6 +29,7 @@ const onlineSockets = new Map(); // socket.id → { username, isActive }
 const registeredNames = new Set(); // All taken usernames
 const friendData = new Map(); // username → [friends] — permanent
 const pendingRequests = new Map(); // username → [list of pending requests]
+const userTheme = new Map(); // ✅ THEME SAVED PER USER, FOREVER (light/dark)
 
 function clean(input) {
   return sanitizeHtml(input.trim(), { allowedTags: [], allowedAttributes: {} });
@@ -64,7 +65,7 @@ io.on("connection", (socket) => {
     socket.emit("online list", getOnlineUsers());
   });
 
-  // JOIN — load friends + pending requests
+  // JOIN — load friends + pending requests + ✅ THEME
   socket.on("join", (rawName) => {
     const name = clean(rawName);
     const lowerName = name.toLowerCase();
@@ -78,6 +79,7 @@ io.on("connection", (socket) => {
     // Existing user
     if (registeredNames.has(lowerName)) {
       socket.emit("friends list", friendData.get(name) || []);
+      socket.emit("theme-sync", userTheme.get(name) || "light"); // ✅ SEND SAVED THEME
       sendPendingRequests(name, socket.id);
       socket.emit("join result", { success: true });
       broadcastOnline();
@@ -88,10 +90,20 @@ io.on("connection", (socket) => {
     registeredNames.add(lowerName);
     friendData.set(name, []);
     pendingRequests.set(name, []);
+    userTheme.set(name, "light"); // ✅ DEFAULT LIGHT MODE
     socket.emit("friends list", []);
+    socket.emit("theme-sync", "light");
     socket.emit("join result", { success: true });
     socket.broadcast.emit("system", `${name} joined`);
     broadcastOnline();
+  });
+
+  // ✅ SAVE THEME TO SERVER PERMANENTLY
+  socket.on("save-theme", ({ theme }) => {
+    const userData = onlineSockets.get(socket.id);
+    if (userData && userTheme.has(userData.username)) {
+      userTheme.set(userData.username, theme);
+    }
   });
 
   // Tab active/inactive
@@ -193,4 +205,4 @@ io.on("connection", (socket) => {
 });
 
 // --------------------------
-server.listen(PORT, () => console.log("✅ Server running — All features fixed"));
+server.listen(PORT, () => console.log("✅ Server running — All features fixed + Theme System"));
