@@ -18,11 +18,6 @@ app.use(cors({
 }));
 app.use(express.json({ limit: '10kb' }));
 
-// ✅ CRITICAL ROUTE — /users/1/profile → serves profile.html
-app.get('/users/:id/profile', (req, res) => {
-  res.sendFile('users/profile/profile.html', { root: __dirname });
-});
-
 // --------------------------
 const io = new Server(server, {
   cors: { origin: ALLOWED_ORIGINS, credentials: true }
@@ -37,10 +32,6 @@ const pendingRequests = new Map(); // username → [list of pending requests]
 
 // ✅ ✅ ✅ CRITICAL FIX: STORE THEME SEPARATELY FROM SOCKET CONNECTION — PERMANENT
 const userTheme = new Map(); // username → theme ("light"/"dark") — **ALWAYS REMEMBERED**
-
-// ✅ ADDED: USER ID SYSTEM — assigns #1, #2, #3... forever
-let nextUserId = 1;
-const userAccounts = new Map(); // id → { id, username, joined, online }
 
 function clean(input) {
   return sanitizeHtml(input.trim(), { allowedTags: [], allowedAttributes: {} });
@@ -76,7 +67,7 @@ io.on("connection", (socket) => {
     socket.emit("online list", getOnlineUsers());
   });
 
-  // JOIN — load friends + pending requests + ✅ THEME + ✅ USER ID
+  // JOIN — load friends + pending requests + ✅ THEME
   socket.on("join", (rawName) => {
     const name = clean(rawName);
     const lowerName = name.toLowerCase();
@@ -95,11 +86,7 @@ io.on("connection", (socket) => {
       socket.emit("theme-sync", userTheme.get(name) || "light"); 
       
       sendPendingRequests(name, socket.id);
-      
-      // ✅ send back existing ID
-      const existingId = [...userAccounts.entries()].find(([_,a])=>a.username===name)?.[0];
-      socket.emit("join result", { success: true, userId: existingId });
-      
+      socket.emit("join result", { success: true });
       broadcastOnline();
       return;
     }
@@ -111,26 +98,10 @@ io.on("connection", (socket) => {
     
     // ✅ Set default ONLY for NEW users
     userTheme.set(name, "light"); 
-
-    // ✅ assign new permanent ID
-    const newId = nextUserId++;
-    // ✅ JOIN DATE IN DD/MM/YYYY FORMAT EXACTLY
-    const now = new Date();
-    const day = String(now.getDate()).padStart(2, '0');
-    const month = String(now.getMonth() + 1).padStart(2, '0');
-    const year = now.getFullYear();
-    const joinDate = `${day}/${month}/${year}`;
-
-    userAccounts.set(newId, {
-      id: newId,
-      username: name,
-      joined: joinDate,
-      online: true
-    });
     
     socket.emit("friends list", []);
     socket.emit("theme-sync", "light");
-    socket.emit("join result", { success: true, userId: newId });
+    socket.emit("join result", { success: true });
     socket.broadcast.emit("system", `${name} joined`);
     broadcastOnline();
   });
@@ -178,11 +149,6 @@ io.on("connection", (socket) => {
       userTheme.delete(cleanOld);
     }
 
-    // ✅ UPDATE NAME IN PROFILE RECORD
-    for (const [id, acc] of userAccounts.entries()) {
-      if (acc.username === cleanOld) acc.username = cleanNew;
-    }
-
     // Update online status
     for (const [id, data] of onlineSockets.entries()) {
       if (data.username === cleanOld) {
@@ -198,15 +164,6 @@ io.on("connection", (socket) => {
     socket.emit("change result", { success: true, newName: cleanNew });
   });
 
-  // ✅ PROFILE FETCH — serves data to /users/X/profile
-  socket.on("get profile", (userId) => {
-    const uid = Number(userId);
-    if (!userAccounts.has(uid)) return socket.emit("profile data", { error: true });
-    const acc = userAccounts.get(uid);
-    acc.online = getOnlineUsers().includes(acc.username);
-    socket.emit("profile data", acc);
-  });
-
   // Tab active/inactive
   socket.on("activity change", ({ active }) => {
     if (onlineSockets.has(socket.id)) {
@@ -215,20 +172,12 @@ io.on("connection", (socket) => {
     }
   });
 
-  // ✅ CHAT — NOW INCLUDES USER ID so links work
+  // CHAT
   socket.on("chat message", (data) => {
     const userData = onlineSockets.get(socket.id);
     if (!userData || !data.text) return;
-
-    // ✅ find user ID for this sender
-    let fromId = null;
-    for (const [id, acc] of userAccounts.entries()) {
-      if (acc.username === userData.username) fromId = id;
-    }
-
     io.emit("chat message", {
       from: userData.username,
-      fromId: fromId,
       text: clean(data.text),
       time: new Date().toISOString()
     });
@@ -251,6 +200,8 @@ io.on("connection", (socket) => {
         return;
       }
     }
+
+    // Save permanently if offline
     if (!pendingRequests.get(to).includes(from)) {
       pendingRequests.get(to).push(from);
       socket.emit("system", `📨 Request saved — ${to} will see it when they return`);
@@ -259,7 +210,12 @@ io.on("connection", (socket) => {
 
   // ACCEPT REQUEST
   socket.on("friend accept", ({ user, from }) => {
-    if (pendingRequests.has(user)) pendingRequests.set(user, pendingRequests.get(user).filter(f => f !== from));
+    // Remove from pending
+    if (pendingRequests.has(user)) {
+      pendingRequests.set(user, pendingRequests.get(user).filter(f => f !== from));
+    }
+
+    // Save friendship
     if (!friendData.has(user)) friendData.set(user, []);
     if (!friendData.has(from)) friendData.set(from, []);
     if (!friendData.get(user).includes(from)) friendData.get(user).push(from);
@@ -274,29 +230,27 @@ io.on("connection", (socket) => {
 
   // ✅ DECLINE REQUEST — notify sender & fully remove so you can send again
   socket.on("friend decline", ({ user, from }) => {
+    // Remove from pending list completely
     if (pendingRequests.has(user)) {
       pendingRequests.set(user, pendingRequests.get(user).filter(f => f !== from));
     }
+    // Tell sender they were declined
     const senderSocket = [...onlineSockets.entries()].find(([_,u]) => u.username === from)?.[0];
     if (senderSocket) {
       io.to(senderSocket).emit("request declined", { by: user });
     }
   });
 
-  // ✅ UNFRIEND — FIXED
+  // UNFRIEND
   socket.on("unfriend", ({ user, friend }) => {
-    if (friendData.has(user)) {
-      friendData.set(user, friendData.get(user).filter(f => f !== friend));
-    }
-    if (friendData.has(friend)) {
-      friendData.set(friend, friendData.get(friend).filter(f => f !== user));
-    }
+    if (friendData.has(user)) friendData.set(user, friendData.get(user).filter(f => f !== friend));
+    if (friendData.has(friend)) friendData.set(friend).filter(f => f !== user);
 
     io.emit("friend removed", { friend, forUser: user });
     io.emit("friend removed", { friend: user, forUser: friend });
 
-    io.to(user).emit("friends list", friendData.get(user) || []);
-    io.to(friend).emit("friends list", friendData.get(friend) || []);
+    io.to(user).emit("friends list", friendData.get(user));
+    io.to(friend).emit("friends list", friendData.get(friend));
   });
 
   // DISCONNECT
