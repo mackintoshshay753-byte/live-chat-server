@@ -10,7 +10,7 @@ const server = http.createServer(app);
 
 // --------------------------
 const PORT = process.env.PORT || 3000;
-const ALLOWED_ORIGINS = ["https://idontknowww.neocities.org"];
+const ALLOWED_ORIGINS = ["https://idontknowww.neocities.org"]; // YOUR SITE URL
 
 app.use(cors({
   origin: ALLOWED_ORIGINS,
@@ -28,7 +28,7 @@ const io = new Server(server, {
 const onlineSockets = new Map(); // socket.id → { username, isActive }
 const registeredNames = new Set(); // All taken usernames
 const friendData = new Map(); // username → [friends] — permanent
-const pendingRequests = new Map(); // ✅ NEW: username → [list of requests waiting for them]
+const pendingRequests = new Map(); // ✅ username → [list of pending requests] — SAVED FOREVER
 
 function clean(input) {
   return sanitizeHtml(input.trim(), { allowedTags: [], allowedAttributes: {} });
@@ -47,7 +47,7 @@ function broadcastOnline() {
   io.emit("online list", getOnlineUsers());
 }
 
-// Send all pending requests to user when they join/come online
+// ✅ SEND ALL SAVED REQUESTS IMMEDIATELY WHEN USER JOINS/RETURNS
 function sendPendingRequests(username, socketId) {
   if (pendingRequests.has(username)) {
     pendingRequests.get(username).forEach(fromUser => {
@@ -64,7 +64,7 @@ io.on("connection", (socket) => {
     socket.emit("online list", getOnlineUsers());
   });
 
-  // JOIN — loads friends + any pending requests
+  // JOIN — ✅ LOAD FRIENDS + SEND ALL WAITING REQUESTS
   socket.on("join", (rawName) => {
     const name = clean(rawName);
     const lowerName = name.toLowerCase();
@@ -75,19 +75,19 @@ io.on("connection", (socket) => {
 
     onlineSockets.set(socket.id, { username: name, isActive: true });
 
-    // Existing user — load saved friends + waiting requests
+    // Existing user — load saved friends + pending requests
     if (registeredNames.has(lowerName)) {
       socket.emit("friends list", friendData.get(name) || []);
-      sendPendingRequests(name, socket.id); // ✅ Send saved requests
+      sendPendingRequests(name, socket.id); // ✅ PROMPTS POP UP NOW
       socket.emit("join result", { success: true });
       broadcastOnline();
       return;
     }
 
-    // New user
+    // New user — create empty lists
     registeredNames.add(lowerName);
     friendData.set(name, []);
-    pendingRequests.set(name, []); // Create empty request list
+    pendingRequests.set(name, []);
     socket.emit("friends list", []);
     socket.emit("join result", { success: true });
     socket.broadcast.emit("system", `${name} joined`);
@@ -106,7 +106,11 @@ io.on("connection", (socket) => {
   socket.on("chat message", (data) => {
     const userData = onlineSockets.get(socket.id);
     if (!userData || !data.text) return;
-    io.emit("chat message", { from: userData.username, text: clean(data.text), time: new Date() });
+    io.emit("chat message", {
+      from: userData.username,
+      text: clean(data.text),
+      time: new Date().toISOString()
+    });
   });
 
   // TYPING
@@ -116,9 +120,9 @@ io.on("connection", (socket) => {
   });
   socket.on("stop typing", () => socket.broadcast.emit("stop typing"));
 
-  // ✅ FRIEND REQUEST — SAVED IF OFFLINE, DELIVERED WHEN THEY RETURN
+  // ✅ FRIEND REQUEST — SAVE IF OFFLINE, DELIVERED WHEN THEY RETURN
   socket.on("friend request", ({ from, to }) => {
-    // If target is online & active → send now
+    // If online & active → send now
     const targetActive = [...onlineSockets.entries()].some(([_,u]) => u.username === to && u.isActive);
     if (targetActive) {
       const targetId = [...onlineSockets.entries()].find(([_,u]) => u.username === to)?.[0];
@@ -128,21 +132,19 @@ io.on("connection", (socket) => {
       }
     }
 
-    // If offline → SAVE PERMANENTLY until they join back
+    // If offline → SAVE PERMANENTLY
     if (!pendingRequests.get(to).includes(from)) {
       pendingRequests.get(to).push(from);
       socket.emit("system", `📨 Request saved — ${to} will see it when they return`);
     }
   });
 
-  // ACCEPT REQUEST
+  // ACCEPT — REMOVE FROM PENDING, SAVE FRIENDSHIP
   socket.on("friend accept", ({ user, from }) => {
-    // Remove from pending list
     if (pendingRequests.has(user)) {
       pendingRequests.set(user, pendingRequests.get(user).filter(f => f !== from));
     }
 
-    // Save friendship forever
     if (!friendData.has(user)) friendData.set(user, []);
     if (!friendData.has(from)) friendData.set(from, []);
 
@@ -156,21 +158,20 @@ io.on("connection", (socket) => {
     io.to(from).emit("friends list", friendData.get(from));
   });
 
-  // DECLINE REQUEST
+  // DECLINE — JUST REMOVE FROM PENDING
   socket.on("friend decline", ({ user, from }) => {
-    // Remove from pending
     if (pendingRequests.has(user)) {
       pendingRequests.set(user, pendingRequests.get(user).filter(f => f !== from));
     }
-    io.emit("friend declined", { to: user, forUser: from });
+    io.to(user).emit("friend declined", { to: from, forUser: user });
   });
 
   // UNFRIEND
   socket.on("unfriend", ({ user, friend }) => {
     if (friendData.has(user)) friendData.set(user, friendData.get(user).filter(f => f !== friend));
-    if (friendData.has(friend)) friendData.set(friendData.get(friend).filter(f => f !== user));
+    if (friendData.has(friend)) friendData.set(friend).filter(f => f !== user);
 
-    io.emit("friend removed", { friend: friend, forUser: user });
+    io.emit("friend removed", { friend, forUser: user });
     io.emit("friend removed", { friend: user, forUser: friend });
 
     io.to(user).emit("friends list", friendData.get(user));
@@ -187,4 +188,4 @@ io.on("connection", (socket) => {
 });
 
 // --------------------------
-server.listen(PORT, () => console.log("✅ Server running — Requests saved, Friends permanent"));
+server.listen(PORT, () => console.log("✅ Server running — Requests & Friends saved forever"));
