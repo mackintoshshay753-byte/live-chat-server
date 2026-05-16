@@ -25,7 +25,7 @@ const io = new Server(server, {
 
 // --------------------------
 // ✅ PERMANENT STORAGE — NEVER RESET
-const onlineSockets = new Map(); // socket.id → username
+const onlineSockets = new Map(); // socket.id → { username, isActive }
 const registeredNames = new Set(); // All taken usernames
 const friendData = new Map(); // username → [friends] — SAVED FOREVER
 
@@ -33,9 +33,13 @@ function clean(input) {
   return sanitizeHtml(input.trim(), { allowedTags: [], allowedAttributes: {} });
 }
 
-// Get unique online users
+// Get users who have AT LEAST ONE active tab open
 function getOnlineUsers() {
-  return [...new Set(Array.from(onlineSockets.values()))];
+  const activeUsers = new Set();
+  for (const [_, data] of onlineSockets.entries()) {
+    if (data.isActive) activeUsers.add(data.username);
+  }
+  return [...activeUsers];
 }
 
 // Send online list to everyone
@@ -52,7 +56,7 @@ io.on("connection", (socket) => {
     socket.emit("online list", getOnlineUsers());
   });
 
-  // JOIN — ALLOW MULTIPLE TABS, BLOCK OTHERS
+  // JOIN — ALLOW MULTIPLE TABS, BLOCK DUPLICATE USERNAMES
   socket.on("join", (rawName) => {
     const name = clean(rawName);
     const lowerName = name.toLowerCase();
@@ -61,10 +65,11 @@ io.on("connection", (socket) => {
       return socket.emit("join result", { success: false, message: "Invalid name (2-20 chars)" });
     }
 
-    // If already registered (YOU or someone else)
+    // Register this socket connection for the user
+    onlineSockets.set(socket.id, { username: name, isActive: true });
+
+    // If already registered before
     if (registeredNames.has(lowerName)) {
-      onlineSockets.set(socket.id, name);
-      // ✅ ALWAYS send saved friends — NEVER EMPTY
       socket.emit("friends list", friendData.get(name) || []);
       socket.emit("join result", { success: true });
       broadcastOnline();
@@ -73,7 +78,6 @@ io.on("connection", (socket) => {
 
     // First time registering
     registeredNames.add(lowerName);
-    onlineSockets.set(socket.id, name);
     friendData.set(name, []); // Create permanent empty list
     socket.emit("friends list", []);
     socket.emit("join result", { success: true });
@@ -81,25 +85,36 @@ io.on("connection", (socket) => {
     broadcastOnline();
   });
 
+  // ✅ TAB ACTIVITY UPDATES
+  socket.on("activity change", ({ active }) => {
+    if (onlineSockets.has(socket.id)) {
+      onlineSockets.get(socket.id).isActive = active;
+      broadcastOnline();
+    }
+  });
+
   // CHAT
   socket.on("chat message", (data) => {
-    const from = onlineSockets.get(socket.id);
-    if (!from || !data.text) return;
-    io.emit("chat message", { from, text: clean(data.text), time: new Date() });
+    const userData = onlineSockets.get(socket.id);
+    if (!userData || !data.text) return;
+    io.emit("chat message", { from: userData.username, text: clean(data.text), time: new Date() });
   });
 
   // TYPING
   socket.on("typing", () => {
-    const user = onlineSockets.get(socket.id);
-    if (user) socket.broadcast.emit("typing", user);
+    const userData = onlineSockets.get(socket.id);
+    if (userData && userData.isActive) socket.broadcast.emit("typing", userData.username);
   });
   socket.on("stop typing", () => socket.broadcast.emit("stop typing"));
 
   // FRIEND SYSTEM — PERMANENT ADD & REMOVE
   socket.on("friend request", ({ from, to }) => {
-    const targetId = [...onlineSockets.entries()].find(([_,u]) => u === to)?.[0];
-    if (!targetId) return socket.emit("system", `⚠️ ${to} is offline`);
-    io.to(targetId).emit("friend request received", { from });
+    // Find if target has ANY active socket
+    const targetActive = [...onlineSockets.entries()].some(([_,u]) => u.username === to && u.isActive);
+    if (!targetActive) return socket.emit("system", `⚠️ ${to} is offline`);
+    
+    const targetId = [...onlineSockets.entries()].find(([_,u]) => u.username === to)?.[0];
+    if (targetId) io.to(targetId).emit("friend request received", { from });
   });
 
   socket.on("friend accept", ({ user, from }) => {
@@ -117,7 +132,7 @@ io.on("connection", (socket) => {
   socket.on("unfriend", ({ user, friend }) => {
     // ✅ REMOVE — PERMANENT
     if (friendData.has(user)) friendData.set(user, friendData.get(user).filter(f => f !== friend));
-    if (friendData.has(friend)) friendData.set(friend, friendData.get(friend).filter(f => f !== user));
+    if (friendData.has(friend)) friendData.set(friendData.get(friend).filter(f => f !== user));
 
     io.emit("friend removed", { friend: friend, forUser: user });
     io.emit("friend removed", { friend: user, forUser: friend });
@@ -130,12 +145,11 @@ io.on("connection", (socket) => {
     io.emit("friend declined", { to: user, forUser: from });
   });
 
-  // DISCONNECT — ONLY UPDATE ONLINE STATUS
+  // DISCONNECT — Remove this tab's connection
   socket.on("disconnect", () => {
-    const user = onlineSockets.get(socket.id);
-    if (user) {
+    if (onlineSockets.has(socket.id)) {
       onlineSockets.delete(socket.id);
-      broadcastOnline(); // ✅ Only online changes — FRIENDS STAY
+      broadcastOnline(); // Update online status
     }
   });
 });
