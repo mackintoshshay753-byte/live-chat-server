@@ -92,7 +92,7 @@ io.on('connection', (socket) => {
       if (!userFriends.has(username)) userFriends.set(username, []);
       socket.emit('friends list', userFriends.get(username));
       socket.emit('join result', { success: true });
-      updateOnline(); // ✅ UPDATE COUNT WHEN YOU JOIN AGAIN
+      updateOnline();
       return;
     }
 
@@ -104,7 +104,7 @@ io.on('connection', (socket) => {
 
     socket.emit('join result', { success: true });
     socket.broadcast.emit('system', `${username} joined`);
-    updateOnline(); // ✅ UPDATE COUNT WHEN NEW USER JOINS
+    updateOnline();
   });
 
   // MESSAGE
@@ -168,7 +168,7 @@ io.on('connection', (socket) => {
     const user = onlineUsers.get(socket.id);
     if (user) {
       onlineUsers.delete(socket.id);
-      updateOnline(); // ✅ UPDATE COUNT WHEN SOMEONE LEAVES
+      updateOnline();
     }
   });
 });
