@@ -60,15 +60,21 @@ function sanitizeInput(input) {
   });
 }
 
+// Count UNIQUE usernames currently online
+function getUniqueOnlineCount() {
+  const unique = new Set(Array.from(onlineUsers.values()));
+  return unique.size;
+}
+
 // --------------------------
 io.on('connection', (socket) => {
 
   console.log("Connected:", socket.id);
 
-  socket.emit('online count', onlineUsers.size);
+  socket.emit('online count', getUniqueOnlineCount());
 
   const updateOnline = () => {
-    io.emit('online count', onlineUsers.size);
+    io.emit('online count', getUniqueOnlineCount());
   };
 
   // JOIN — ✅ ALLOW MULTIPLE CONNECTIONS FROM SAME USERNAME
@@ -82,11 +88,12 @@ io.on('connection', (socket) => {
 
     // ❌ BLOCK ONLY IF SOMEONE ELSE TRIES TO USE IT
     if (registeredUsernames.has(lowerName)) {
-      // Already registered — allow if it's same user, block if different
       onlineUsers.set(socket.id, username);
       if (!userFriends.has(username)) userFriends.set(username, []);
       socket.emit('friends list', userFriends.get(username));
-      return socket.emit('join result', { success: true });
+      socket.emit('join result', { success: true });
+      updateOnline(); // ✅ UPDATE COUNT WHEN YOU JOIN AGAIN
+      return;
     }
 
     // ✅ FIRST TIME — REGISTER IT FOREVER
@@ -97,7 +104,7 @@ io.on('connection', (socket) => {
 
     socket.emit('join result', { success: true });
     socket.broadcast.emit('system', `${username} joined`);
-    updateOnline();
+    updateOnline(); // ✅ UPDATE COUNT WHEN NEW USER JOINS
   });
 
   // MESSAGE
@@ -131,7 +138,7 @@ io.on('connection', (socket) => {
 
   // ONLINE
   socket.on('request online', () => {
-    socket.emit('online count', onlineUsers.size);
+    socket.emit('online count', getUniqueOnlineCount());
   });
 
   // 🤝 FRIEND REQUEST SYSTEM
@@ -161,7 +168,7 @@ io.on('connection', (socket) => {
     const user = onlineUsers.get(socket.id);
     if (user) {
       onlineUsers.delete(socket.id);
-      updateOnline();
+      updateOnline(); // ✅ UPDATE COUNT WHEN SOMEONE LEAVES
     }
   });
 });
