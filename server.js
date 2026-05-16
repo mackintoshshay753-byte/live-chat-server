@@ -50,8 +50,9 @@ const io = new Server(server, {
 // --------------------------
 const onlineUsers = new Map(); // socket.id → username
 const userSockets = new Map(); // username → socket.id
+const allUsernames = new Set(); // ALL usernames EVER used (lowercase for check)
 
-// 🧠 Persistent storage (in memory — replace with DB for production)
+// 🧠 Persistent storage
 const userFriends = new Map(); // username → [friendUsernames]
 
 function sanitizeInput(input) {
@@ -73,16 +74,24 @@ io.on('connection', (socket) => {
     io.emit('online count', onlineUsers.size);
   };
 
-  // JOIN
+  // JOIN — WITH UNIQUE CHECK (CASE-INSENSITIVE)
   socket.on('join', (rawUsername) => {
     if (onlineUsers.has(socket.id)) return;
 
     const username = sanitizeInput(rawUsername) || "Anonymous";
+    const lowerName = username.toLowerCase();
 
     if (username.length < 2 || username.length > 20) {
-      return socket.emit('system', "Invalid username");
+      return socket.emit('join result', { success: false, message: "Invalid length (2-20 chars)" });
     }
 
+    // ❌ CANNOT use same name — even different case, even if not online
+    if (allUsernames.has(lowerName)) {
+      return socket.emit('join result', { success: false, message: "Username already taken (case doesn't matter)" });
+    }
+
+    // ✅ Save forever
+    allUsernames.add(lowerName);
     onlineUsers.set(socket.id, username);
     userSockets.set(username, socket.id);
 
@@ -90,6 +99,7 @@ io.on('connection', (socket) => {
     if (!userFriends.has(username)) userFriends.set(username, []);
     socket.emit('friends list', userFriends.get(username));
 
+    socket.emit('join result', { success: true });
     socket.broadcast.emit('system', `${username} joined`);
     updateOnline();
   });
