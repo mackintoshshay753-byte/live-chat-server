@@ -24,10 +24,10 @@ const io = new Server(server, {
 });
 
 // --------------------------
-// ✅ PERMANENT STORAGE — NEVER RESET
+// ✅ PERMANENT STORAGE — PRESERVED, NO RESET
 const onlineSockets = new Map(); // socket.id → { username, isActive }
 const registeredNames = new Set(); // All taken usernames
-const friendData = new Map(); // username → [friends] — SAVED FOREVER
+const friendData = new Map(); // username → [friends] — KEEPS ALL EXISTING DATA
 
 function clean(input) {
   return sanitizeHtml(input.trim(), { allowedTags: [], allowedAttributes: {} });
@@ -56,7 +56,7 @@ io.on("connection", (socket) => {
     socket.emit("online list", getOnlineUsers());
   });
 
-  // JOIN — ALLOW MULTIPLE TABS, BLOCK DUPLICATE USERNAMES
+  // JOIN — PRESERVES EXISTING FRIENDS LIST
   socket.on("join", (rawName) => {
     const name = clean(rawName);
     const lowerName = name.toLowerCase();
@@ -68,7 +68,7 @@ io.on("connection", (socket) => {
     // Register this socket connection for the user
     onlineSockets.set(socket.id, { username: name, isActive: true });
 
-    // If already registered before
+    // ✅ IF USER ALREADY EXISTS — SEND THEIR ORIGINAL FRIENDS LIST (DO NOT OVERWRITE)
     if (registeredNames.has(lowerName)) {
       socket.emit("friends list", friendData.get(name) || []);
       socket.emit("join result", { success: true });
@@ -76,16 +76,16 @@ io.on("connection", (socket) => {
       return;
     }
 
-    // First time registering
+    // First time registering only
     registeredNames.add(lowerName);
-    friendData.set(name, []); // Create permanent empty list
+    friendData.set(name, []);
     socket.emit("friends list", []);
     socket.emit("join result", { success: true });
     socket.broadcast.emit("system", `${name} joined`);
     broadcastOnline();
   });
 
-  // ✅ TAB ACTIVITY UPDATES
+  // ✅ TAB ACTIVITY UPDATES — NO EFFECT ON FRIEND DATA
   socket.on("activity change", ({ active }) => {
     if (onlineSockets.has(socket.id)) {
       onlineSockets.get(socket.id).isActive = active;
@@ -107,9 +107,8 @@ io.on("connection", (socket) => {
   });
   socket.on("stop typing", () => socket.broadcast.emit("stop typing"));
 
-  // FRIEND SYSTEM — PERMANENT ADD & REMOVE
+  // FRIEND SYSTEM — ✅ PRESERVED, NO DELETION
   socket.on("friend request", ({ from, to }) => {
-    // Find if target has ANY active socket
     const targetActive = [...onlineSockets.entries()].some(([_,u]) => u.username === to && u.isActive);
     if (!targetActive) return socket.emit("system", `⚠️ ${to} is offline`);
     
@@ -118,38 +117,41 @@ io.on("connection", (socket) => {
   });
 
   socket.on("friend accept", ({ user, from }) => {
-    // ✅ ADD — PERMANENT
+    // ✅ ADD — PERMANENT, NO OVERWRITE
+    if (!friendData.get(user)) friendData.set(user, []);
+    if (!friendData.get(from)) friendData.set(from, []);
+
     if (!friendData.get(user).includes(from)) friendData.get(user).push(from);
     if (!friendData.get(from).includes(user)) friendData.get(from).push(user);
 
     io.emit("friend added", { friend: from, forUser: user });
     io.emit("friend added", { friend: user, forUser: from });
 
-    io.emit("friends list", friendData.get(user));
-    io.emit("friends list", friendData.get(from));
+    io.to(user).emit("friends list", friendData.get(user));
+    io.to(from).emit("friends list", friendData.get(from));
   });
 
   socket.on("unfriend", ({ user, friend }) => {
-    // ✅ REMOVE — PERMANENT
+    // ✅ REMOVE ONLY WHEN EXPLICITLY REQUESTED
     if (friendData.has(user)) friendData.set(user, friendData.get(user).filter(f => f !== friend));
     if (friendData.has(friend)) friendData.set(friendData.get(friend).filter(f => f !== user));
 
     io.emit("friend removed", { friend: friend, forUser: user });
     io.emit("friend removed", { friend: user, forUser: friend });
 
-    io.emit("friends list", friendData.get(user));
-    io.emit("friends list", friendData.get(friend));
+    io.to(user).emit("friends list", friendData.get(user));
+    io.to(friend).emit("friends list", friendData.get(friend));
   });
 
   socket.on("friend decline", ({ user, from }) => {
     io.emit("friend declined", { to: user, forUser: from });
   });
 
-  // DISCONNECT — Remove this tab's connection
+  // DISCONNECT — ONLY UPDATE ONLINE STATUS
   socket.on("disconnect", () => {
     if (onlineSockets.has(socket.id)) {
       onlineSockets.delete(socket.id);
-      broadcastOnline(); // Update online status
+      broadcastOnline();
     }
   });
 });
