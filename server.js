@@ -1,4 +1,3 @@
-// server.js
 require('dotenv').config();
 const express = require('express');
 const http = require('http');
@@ -49,7 +48,11 @@ const io = new Server(server, {
 });
 
 // --------------------------
-const onlineUsers = new Map();
+const onlineUsers = new Map(); // socket.id → username
+const userSockets = new Map(); // username → socket.id
+
+// 🧠 Persistent storage (in memory — replace with DB for production)
+const userFriends = new Map(); // username → [friendUsernames]
 
 function sanitizeInput(input) {
   if (typeof input !== 'string') return '';
@@ -81,6 +84,11 @@ io.on('connection', (socket) => {
     }
 
     onlineUsers.set(socket.id, username);
+    userSockets.set(username, socket.id);
+
+    // Load or create friend list
+    if (!userFriends.has(username)) userFriends.set(username, []);
+    socket.emit('friends list', userFriends.get(username));
 
     socket.broadcast.emit('system', `${username} joined`);
     updateOnline();
@@ -120,12 +128,39 @@ io.on('connection', (socket) => {
     socket.emit('online count', onlineUsers.size);
   });
 
+  // 🤝 FRIEND REQUEST SYSTEM
+  socket.on('friend request', ({ from, to }) => {
+    const targetSocketId = userSockets.get(to);
+    if (!targetSocketId) return socket.emit('system', `⚠️ ${to} is not online`);
+
+    io.to(targetSocketId).emit('friend request received', { from });
+  });
+
+  socket.on('friend accept', ({ user, from }) => {
+    // Add both ways
+    if (!userFriends.get(user).includes(from)) userFriends.get(user).push(from);
+    if (!userFriends.get(from).includes(user)) userFriends.get(from).push(user);
+
+    // Notify both
+    const userSocket = userSockets.get(user);
+    const fromSocket = userSockets.get(from);
+
+    if (userSocket) io.to(userSocket).emit('friend added', { friend: from });
+    if (fromSocket) io.to(fromSocket).emit('friend added', { friend: user });
+  });
+
+  socket.on('friend decline', ({ user, from }) => {
+    const fromSocket = userSockets.get(from);
+    if (fromSocket) io.to(fromSocket).emit('friend request declined', { to: user });
+  });
+
   // DISCONNECT
   socket.on('disconnect', () => {
     const user = onlineUsers.get(socket.id);
 
     if (user) {
       onlineUsers.delete(socket.id);
+      userSockets.delete(user);
       socket.broadcast.emit('system', `${user} left`);
       updateOnline();
     }
