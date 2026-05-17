@@ -30,7 +30,6 @@ const friendData = new Map();        // username → [friendNames]
 const pendingRequests = new Map();   // username → [requesterNames]
 const userTheme = new Map();         // username → themeName
 const userProfiles = new Map();      // username → profileObject
-const lastOnlineTime = new Map();    // ✅ NEW: username → timestamp
 let nextUserId = 1;
 
 // ----------------------
@@ -63,10 +62,6 @@ function createProfile(username) {
   };
 
   userProfiles.set(username, profile);
-  // ✅ Set default last online to join time
-  if (!lastOnlineTime.has(username)) {
-    lastOnlineTime.set(username, new Date().toISOString());
-  }
   return profile;
 }
 
@@ -89,25 +84,6 @@ function sendPendingRequests(username, socketId) {
   for (const fromUser of pendingRequests.get(username)) {
     io.to(socketId).emit("friend request received", { from: fromUser });
   }
-}
-
-// ✅ NEW: Format time difference like "1 minute ago", "2 hours ago", etc.
-function formatLastOnline(timestamp) {
-  const now = Date.now();
-  const then = new Date(timestamp).getTime();
-  const diffMs = now - then;
-  const diffSec = Math.floor(diffMs / 1000);
-  const diffMin = Math.floor(diffSec / 60);
-  const diffHour = Math.floor(diffMin / 60);
-  const diffDay = Math.floor(diffHour / 24);
-
-  if (diffSec < 60) return "Just now";
-  if (diffMin === 1) return "1 minute ago";
-  if (diffMin < 60) return `${diffMin} minutes ago`;
-  if (diffHour === 1) return "1 hour ago";
-  if (diffHour < 24) return `${diffHour} hours ago`;
-  if (diffDay === 1) return "1 day ago";
-  return `${diffDay} days ago`;
 }
 
 // ----------------------
@@ -185,7 +161,7 @@ io.on("connection", (socket) => {
   socket.on("save-theme", ({ theme }) => {
     const userData = onlineSockets.get(socket.id);
     if (!userData) return;
-    userThemene.set(userData.username, theme);
+    userTheme.set(userData.username, theme);
     if (userProfiles.has(userData.username)) {
       userProfiles.get(userData.username).theme = theme;
     }
@@ -237,12 +213,6 @@ io.on("connection", (socket) => {
       oldProfile.username = cleanNew;
       userProfiles.delete(cleanOld);
       userProfiles.set(cleanNew, oldProfile);
-    }
-
-    // ✅ Migrate last online time
-    if (lastOnlineTime.has(cleanOld)) {
-      lastOnlineTime.set(cleanNew, lastOnlineTime.get(cleanOld));
-      lastOnlineTime.delete(cleanOld);
     }
 
     for (const data of onlineSockets.values()) {
@@ -343,10 +313,6 @@ io.on("connection", (socket) => {
 
   socket.on("disconnect", () => {
     if (onlineSockets.has(socket.id)) {
-      const userData = onlineSockets.get(socket.id);
-      const username = userData.username;
-      // ✅ Save exact time they went offline
-      lastOnlineTime.set(username, new Date().toISOString());
       onlineSockets.delete(socket.id);
       broadcastOnline();
     }
@@ -354,27 +320,13 @@ io.on("connection", (socket) => {
 });
 
 // ----------------------
-// API — ONLY BY ID + LAST ONLINE
+// API — ONLY BY ID
 // ----------------------
 app.get("/api/profile/:id", (req, res) => {
   const id = Number(req.params.id);
   const profile = getProfileById(id);
   if (!profile) return res.status(404).json({ error: "User not found" });
-
-  const username = profile.username;
-  // ✅ Check if currently online
-  const isOnline = getOnlineUsers().includes(username);
-  // ✅ Get formatted last online text
-  const lastOnlineRaw = lastOnlineTime.get(username) || profile.joinDate;
-  const lastOnlineText = isOnline ? "Online Now" : formatLastOnline(lastOnlineRaw);
-
-  // ✅ Send all data including last online
-  res.json({
-    ...profile,
-    isOnline,
-    lastOnline: lastOnlineText,
-    lastOnlineRaw
-  });
+  res.json(profile);
 });
 
 // ❌ REMOVED: /api/user/:username — no more access by name
