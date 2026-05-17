@@ -11,8 +11,9 @@ function setupSockets(io) {
         const name = clean(username);
         const lowerName = name.toLowerCase();
 
-        if (name.length < 2 || name.length > 20)
-          return safeCb(cb, { success: false, message: "Username must be 2-20 characters" });
+        // ✅ UPDATED: 3-20 characters instead of 2-20
+        if (name.length < 3 || name.length > 20)
+          return safeCb(cb, { success: false, message: "Username must be 3-20 characters" });
         if (/\s/.test(name))
           return safeCb(cb, { success: false, message: "No spaces allowed" });
         if (!/^[a-zA-Z0-9_]+$/.test(name))
@@ -82,8 +83,9 @@ function setupSockets(io) {
         const oldLower = cleanOld.toLowerCase();
         const newLower = cleanNew.toLowerCase();
 
-        if (cleanNew.length < 2 || cleanNew > 20)
-          return safeCb(cb, { success: false, message: "Name must be 2-20 characters" });
+        // ✅ UPDATED: 3-20 characters instead of 2-20
+        if (cleanNew.length < 3 || cleanNew.length > 20)
+          return safeCb(cb, { success: false, message: "Name must be 3-20 characters" });
         if (data.registeredNames[newLower])
           return safeCb(cb, { success: false, message: "Name already taken" });
         if (oldLower === newLower)
