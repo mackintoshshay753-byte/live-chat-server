@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { getProfileById, clean } = require('../helpers');
 const { data } = require('../data');
+const { onlineUsers } = require('../sockets/index'); // Fetch tracking map reference
 
 router.get("/profile/:id", (req, res) => {
   const profile = getProfileById(req.params.id);
@@ -23,7 +24,8 @@ router.get("/search/users", (req, res) => {
     if (username.toLowerCase().includes(keyword)) {
       matches.push({
         id: info.id,
-        username: username
+        username: username,
+        online: onlineUsers.has(username) // Assign status boolean dynamically
       });
     }
   });

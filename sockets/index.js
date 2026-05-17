@@ -2,9 +2,24 @@ const bcrypt = require('bcrypt');
 const { data, saveData } = require('../data');
 const { clean, createProfile } = require('../helpers');
 
+// Centralized tracking map for live website connections (username -> socket.id)
+const onlineUsers = new Map();
+
 function setupSockets(io) {
   io.on("connection", (socket) => {
     console.log("🔌 User connected");
+    let mappedUsername = null;
+
+    // Direct registration hook for page refreshes/views
+    socket.on("verify-online", ({ username }) => {
+      if (username) {
+        const name = clean(username);
+        if (data.accounts[name]) {
+          mappedUsername = name;
+          onlineUsers.set(name, socket.id);
+        }
+      }
+    });
 
     socket.on("login", async ({ username, password }, cb) => {
       try {
@@ -18,6 +33,10 @@ function setupSockets(io) {
         const validPassword = await bcrypt.compare(password, account.hash);
         if (!validPassword)
           return safeCb(cb, { success: false, message: "Incorrect password" });
+
+        // Save trace mapping state on login success
+        mappedUsername = name;
+        onlineUsers.set(name, socket.id);
 
         safeCb(cb, { success: true, username: name, id: account.id, theme: account.theme });
       } catch (err) {
@@ -52,6 +71,10 @@ function setupSockets(io) {
         };
         createProfile(name);
         saveData();
+
+        // Save state tracker on direct profile birth
+        mappedUsername = name;
+        onlineUsers.set(name, socket.id);
 
         safeCb(cb, { success: true, username: name, id });
       } catch (err) {
@@ -111,6 +134,13 @@ function setupSockets(io) {
           }
         }
 
+        // Shift active mapping to handle immediate name swaps fluidly
+        if (onlineUsers.has(cleanOld)) {
+          onlineUsers.delete(cleanOld);
+          onlineUsers.set(cleanNew, socket.id);
+          mappedUsername = cleanNew;
+        }
+
         saveData();
         io.emit("username updated", { oldName: cleanOld, newName: cleanNew });
 
@@ -139,10 +169,17 @@ function setupSockets(io) {
         saveData();
 
         safeCb(cb, { success: true, message: "Password updated successfully" });
-
       } catch (err) {
         console.error("CHANGE PASSWORD ERROR:", err);
         safeCb(cb, { success: false, message: "Something went wrong" });
+      }
+    });
+
+    // Cleanup reference keys whenever a user disconnects or exits tabs
+    socket.on("disconnect", () => {
+      console.log("❌ User disconnected");
+      if (mappedUsername) {
+        onlineUsers.delete(mappedUsername);
       }
     });
 
@@ -153,4 +190,5 @@ function safeCb(cb, data) {
   if (typeof cb === "function") cb(data);
 }
 
-module.exports = setupSockets;
+// Export named fields so route controls can inspect the connection maps directly
+module.exports = { setupSockets, onlineUsers };
