@@ -3,13 +3,10 @@ const { data, saveData } = require('../data');
 const { clean, createProfile } = require('../helpers');
 
 function setupSockets(io) {
-  // ✅ Make sure list exists
-  if (!data.onlineUsers) data.onlineUsers = [];
-
   io.on("connection", (socket) => {
     console.log("🔌 User connected");
 
-    // ✅ LOGIN — MARK AS ONLINE + SAVE
+    // LOGIN
     socket.on("login", async ({ username, password }, cb) => {
       try {
         const name = clean(username);
@@ -23,19 +20,6 @@ function setupSockets(io) {
         if (!validPassword)
           return safeCb(cb, { success: false, message: "Incorrect password" });
 
-        // ✅ ADD TO ONLINE LIST — ENSURE IT'S A NUMBER
-        const userId = Number(account.id);
-        if (!data.onlineUsers.includes(userId)) {
-          data.onlineUsers.push(userId);
-          saveData(); // ✅ SAVE TO FILE
-          io.emit("status changed");
-          console.log("✅ ONLINE NOW:", username, "(ID:"+userId+")");
-        }
-
-        // ✅ REMEMBER THIS USER ON THE SOCKET
-        socket.userId = userId;
-        socket.username = name;
-
         safeCb(cb, { success: true, username: name, id: account.id, theme: account.theme });
       } catch (err) {
         console.error("Login Error:", err);
@@ -43,25 +27,7 @@ function setupSockets(io) {
       }
     });
 
-    // ✅ DISCONNECT — MARK AS OFFLINE + SAVE
-    socket.on("disconnect", () => {
-      console.log("🔌 User disconnected");
-      if (socket.userId) {
-        const userId = Number(socket.userId);
-        const oldLength = data.onlineUsers.length;
-        data.onlineUsers = data.onlineUsers.filter(id => Number(id) !== userId);
-        
-        if (data.onlineUsers.length !== oldLength) {
-          saveData(); // ✅ SAVE TO FILE
-          console.log("❌ OFFLINE NOW:", socket.username, "(ID:"+userId+")");
-          io.emit("status changed");
-        }
-      }
-    });
-
-    // --------------------------
-    // REST IS 100% YOUR ORIGINAL CODE — DO NOT CHANGE
-    // --------------------------
+    // SIGNUP
     socket.on("signup", async ({ username, password }, cb) => {
       try {
         const name = clean(username);
@@ -96,6 +62,7 @@ function setupSockets(io) {
       }
     });
 
+    // SAVE THEME
     socket.on("save-theme", ({ theme, username }) => {
       try {
         const account = data.accounts[username];
@@ -108,6 +75,7 @@ function setupSockets(io) {
       }
     });
 
+    // CHANGE USERNAME
     socket.on("change username", ({ oldName, newName }, cb) => {
       try {
         const cleanOld = clean(oldName);
@@ -157,6 +125,7 @@ function setupSockets(io) {
       }
     });
 
+    // CHANGE PASSWORD
     socket.on("change password", async ({ username, newPassword }, cb) => {
       try {
         const name = clean(username);
