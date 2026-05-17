@@ -3,14 +3,14 @@ const router = express.Router();
 const { getProfileById, clean } = require('../helpers');
 const { data } = require('../data'); // ← we need this to search users
 
-// Your existing profile route — leave it exactly as is
+// Your existing profile route — left exactly as is
 router.get("/profile/:id", (req, res) => {
   const profile = getProfileById(req.params.id);
   if (!profile) return res.status(404).json({ error: "User not found" });
   res.json(profile);
 });
 
-// ✅ ADD THIS NEW SEARCH ROUTE — this is what your page calls
+// ✅ UPDATED SEARCH ROUTE — NOW INCLUDES ONLINE STATUS
 router.get("/search/users", (req, res) => {
   let keyword = clean(req.query.keyword || "");
   
@@ -27,7 +27,9 @@ router.get("/search/users", (req, res) => {
     if (username.toLowerCase().includes(keyword)) {
       matches.push({
         id: info.id,
-        username: username
+        username: username,
+        // ✅ ADD THIS: send online status (exists in your data.online array)
+        online: Array.isArray(data.online) && data.online.includes(info.id)
       });
     }
   });
