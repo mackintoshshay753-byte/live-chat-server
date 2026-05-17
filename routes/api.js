@@ -1,39 +1,48 @@
 const express = require('express');
 const router = express.Router();
 const { getProfileById, clean } = require('../helpers');
-const { data } = require('../data');
+const { data } = require('../data'); // ← we need this to search users
 
-// Your original profile route — untouched
+// Your existing profile route — leave it exactly as is
 router.get("/profile/:id", (req, res) => {
   const profile = getProfileById(req.params.id);
   if (!profile) return res.status(404).json({ error: "User not found" });
   res.json(profile);
 });
 
-// ✅ FINAL FIXED SEARCH — NOW 100% ACCURATE
+// ✅ ADD THIS NEW SEARCH ROUTE — this is what your page calls
 router.get("/search/users", (req, res) => {
   let keyword = clean(req.query.keyword || "");
 
-  if (!keyword || keyword.length < 3) return res.json([]);
+  // Require at least 3 characters
+  if (!keyword || keyword.length < 3) {
+    return res.json([]);
+  }
 
   keyword = keyword.toLowerCase();
   const matches = [];
 
+  // Make sure online list exists
+  if (!data.onlineUsers) data.onlineUsers = [];
+
+  // Search all accounts
   Object.entries(data.accounts).forEach(([username, info]) => {
     if (username.toLowerCase().includes(keyword)) {
-      // ✅ Convert both to NUMBER so it matches exactly
-      const userId = Number(info.id);
-      const isOnline = !!(data.onlineUsers && Array.isArray(data.onlineUsers) && data.onlineUsers.includes(userId));
+
+      // ✅ CHECK ONLINE STATUS
+      const isOnline = data.onlineUsers.includes(Number(info.id));
 
       matches.push({
-        id: userId,
+        id: info.id,
         username: username,
-        online: isOnline // ✅ TRUE = ONLINE, FALSE = OFFLINE
+        online: isOnline // ✅ SEND TO FRONTEND
       });
     }
   });
 
+  // Sort A-Z
   matches.sort((a, b) => a.username.localeCompare(b.username));
+
   res.json(matches);
 });
 

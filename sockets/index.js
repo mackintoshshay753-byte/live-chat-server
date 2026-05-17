@@ -28,6 +28,7 @@ function setupSockets(io) {
         if (!data.onlineUsers.includes(userId)) {
           data.onlineUsers.push(userId);
           saveData(); // ✅ SAVE TO FILE
+          io.emit("status changed");
           console.log("✅ ONLINE NOW:", username, "(ID:"+userId+")");
         }
 
@@ -53,6 +54,7 @@ function setupSockets(io) {
         if (data.onlineUsers.length !== oldLength) {
           saveData(); // ✅ SAVE TO FILE
           console.log("❌ OFFLINE NOW:", socket.username, "(ID:"+userId+")");
+          io.emit("status changed");
         }
       }
     });
