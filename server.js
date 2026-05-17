@@ -30,19 +30,19 @@ const io = new Server(server, {
 // ----------------------
 const DATA_PATH = path.join(__dirname, 'chat-data.json');
 
-// Default structure — matches exactly what we had before
 const DEFAULT_DATA = {
   nextUserId: 1,
   registeredNames: {},
   accounts: {},
   userProfiles: {},
-  usernameToId: {}
+  usernameToId: {},
+  userSockets: {} // ✅ Track all active sockets per user
 };
 
 let data = { ...DEFAULT_DATA };
 
 // ----------------------
-// SAFE LOAD — NEVER WIPES OLD DATA
+// SAFE LOAD / SAVE
 // ----------------------
 function loadData() {
   if (!fs.existsSync(DATA_PATH)) {
@@ -53,7 +53,6 @@ function loadData() {
   try {
     const raw = fs.readFileSync(DATA_PATH, 'utf8');
     const loaded = JSON.parse(raw);
-    // MERGE — keeps every old entry, adds new fields
     data = { ...DEFAULT_DATA, ...loaded };
     console.log("✅ Data loaded — all users preserved");
   } catch (err) {
@@ -99,16 +98,37 @@ function createProfile(username) {
   return profile;
 }
 
-// ✅ FIXED: finds ID 1 correctly even after updates
 function getProfileById(id) {
   id = Number(id);
   return Object.values(data.userProfiles).find(p => Number(p.id) === id) || null;
+}
+
+// ✅ Check if user has ANY active socket connection
+function updateUserOnlineStatus(username) {
+  const hasActive = Object.values(data.userSockets || {}).some(u => u === username);
+  const account = data.accounts[username];
+  const profile = data.userProfiles[username];
+
+  if (account) account.isOnline = hasActive;
+  if (profile) {
+    profile.isOnline = hasActive;
+    if (!hasActive) profile.lastOnline = new Date().toISOString(); // Only update when going OFFLINE
+  }
+  saveData();
 }
 
 // ----------------------
 // SOCKET EVENTS
 // ----------------------
 io.on("connection", (socket) => {
+
+  // ✅ User opens ANY page — send their username to mark them online
+  socket.on("user present", (username) => {
+    if (!username) return;
+    // Track this socket for the user
+    data.userSockets[socket.id] = username;
+    updateUserOnlineStatus(username);
+  });
 
   // SIGNUP
   socket.on("signup", async ({ username, password }, cb) => {
@@ -142,7 +162,7 @@ io.on("connection", (socket) => {
     cb({ success: true, username: name, id });
   });
 
-  // LOGIN — updates last online
+  // LOGIN
   socket.on("login", async ({ username, password }, cb) => {
     const name = clean(username);
     const lowerName = name.toLowerCase();
@@ -154,14 +174,6 @@ io.on("connection", (socket) => {
     const validPassword = await bcrypt.compare(password, account.hash);
     if (!validPassword)
       return cb({ success: false, message: "Incorrect password" });
-
-    account.isOnline = true;
-    const profile = data.userProfiles[name];
-    if (profile) {
-      profile.isOnline = true;
-      profile.lastOnline = new Date().toISOString(); // ✅ NOW SHOWS CORRECTLY
-    }
-    saveData();
 
     cb({ success: true, username: name, id: account.id, theme: account.theme });
   });
@@ -175,7 +187,7 @@ io.on("connection", (socket) => {
     saveData();
   });
 
-  // CHANGE USERNAME — keeps ID the same
+  // CHANGE USERNAME
   socket.on("change username", ({ oldName, newName }, cb) => {
     const cleanOld = clean(oldName);
     const cleanNew = clean(newName);
@@ -221,24 +233,16 @@ io.on("connection", (socket) => {
     cb({ success: true });
   });
 
-  // DISCONNECT — updates last online
+  // ✅ DISCONNECT — only mark offline when NO pages are open
   socket.on("disconnect", () => {
-    for (const [username, account] of Object.entries(data.accounts)) {
-      if (account.isOnline) {
-        account.isOnline = false;
-        const profile = data.userProfiles[username];
-        if (profile) {
-          profile.isOnline = false;
-          profile.lastOnline = new Date().toISOString(); // ✅ NOW SHOWS CORRECTLY
-        }
-      }
-    }
-    saveData();
+    const username = data.userSockets[socket.id];
+    delete data.userSockets[socket.id];
+    if (username) updateUserOnlineStatus(username);
   });
 });
 
 // ----------------------
-// API — FIXED FOR ID 1
+// API
 // ----------------------
 app.get("/api/profile/:id", (req, res) => {
   const profile = getProfileById(req.params.id);
