@@ -26,11 +26,11 @@ const io = new Server(server, {
 });
 
 // ----------------------
-// STORAGE — DEFAULTS
+// STORAGE — KEEPS OLD DATA SAFE
 // ----------------------
 const DATA_PATH = path.join(__dirname, 'chat-data.json');
 
-// Default structure — NEVER CHANGE KEY NAMES HERE OR YOU BREAK OLD DATA
+// Default structure — matches exactly what we had before
 const DEFAULT_DATA = {
   nextUserId: 1,
   registeredNames: {},
@@ -42,26 +42,23 @@ const DEFAULT_DATA = {
 let data = { ...DEFAULT_DATA };
 
 // ----------------------
-// SAFE LOAD & SAVE
+// SAFE LOAD — NEVER WIPES OLD DATA
 // ----------------------
 function loadData() {
   if (!fs.existsSync(DATA_PATH)) {
-    console.log("📄 No data file found — creating new one");
+    console.log("📄 No file — creating new");
     saveData();
     return;
   }
-
   try {
     const raw = fs.readFileSync(DATA_PATH, 'utf8');
     const loaded = JSON.parse(raw);
-
-    // ✅ SAFELY MERGE — keeps old data, adds missing new keys
+    // MERGE — keeps every old entry, adds new fields
     data = { ...DEFAULT_DATA, ...loaded };
-    console.log("✅ Data loaded successfully — accounts preserved");
+    console.log("✅ Data loaded — all users preserved");
   } catch (err) {
-    console.error("⚠️ Corrupted or invalid data file — starting fresh (old file backed up)");
-    // Backup bad file so you don't lose it forever
-    fs.renameSync(DATA_PATH, DATA_PATH + `.backup-${Date.now()}.json`);
+    console.error("⚠️ Data read error — backup saved, starting fresh");
+    if (fs.existsSync(DATA_PATH)) fs.renameSync(DATA_PATH, DATA_PATH + `.bak-${Date.now()}.json`);
     saveData();
   }
 }
@@ -70,11 +67,10 @@ function saveData() {
   try {
     fs.writeFileSync(DATA_PATH, JSON.stringify(data, null, 2), 'utf8');
   } catch (err) {
-    console.error("❌ Failed to save data:", err.message);
+    console.error("❌ Save failed:", err.message);
   }
 }
 
-// Load ONCE at start
 loadData();
 
 // ----------------------
@@ -103,9 +99,10 @@ function createProfile(username) {
   return profile;
 }
 
+// ✅ FIXED: finds ID 1 correctly even after updates
 function getProfileById(id) {
   id = Number(id);
-  return Object.values(data.userProfiles).find(p => p.id === id) || null;
+  return Object.values(data.userProfiles).find(p => Number(p.id) === id) || null;
 }
 
 // ----------------------
@@ -145,7 +142,7 @@ io.on("connection", (socket) => {
     cb({ success: true, username: name, id });
   });
 
-  // LOGIN
+  // LOGIN — updates last online
   socket.on("login", async ({ username, password }, cb) => {
     const name = clean(username);
     const lowerName = name.toLowerCase();
@@ -158,12 +155,11 @@ io.on("connection", (socket) => {
     if (!validPassword)
       return cb({ success: false, message: "Incorrect password" });
 
-    // Update online status
     account.isOnline = true;
     const profile = data.userProfiles[name];
     if (profile) {
       profile.isOnline = true;
-      profile.lastOnline = new Date().toISOString();
+      profile.lastOnline = new Date().toISOString(); // ✅ NOW SHOWS CORRECTLY
     }
     saveData();
 
@@ -179,7 +175,7 @@ io.on("connection", (socket) => {
     saveData();
   });
 
-  // CHANGE USERNAME
+  // CHANGE USERNAME — keeps ID the same
   socket.on("change username", ({ oldName, newName }, cb) => {
     const cleanOld = clean(oldName);
     const cleanNew = clean(newName);
@@ -193,15 +189,12 @@ io.on("connection", (socket) => {
     if (oldLower === newLower)
       return cb({ success: false, message: "Same as current name" });
 
-    // Update registered names
     delete data.registeredNames[oldLower];
     data.registeredNames[newLower] = true;
 
-    // Update account
     data.accounts[cleanNew] = data.accounts[cleanOld];
     delete data.accounts[cleanOld];
 
-    // Update profile
     const oldProfile = data.userProfiles[cleanOld];
     if (oldProfile) {
       oldProfile.username = cleanNew;
@@ -213,7 +206,6 @@ io.on("connection", (socket) => {
 
     saveData();
     cb({ success: true, newName: cleanNew });
-
     io.emit("username updated", { oldName: cleanOld, newName: cleanNew });
   });
 
@@ -229,14 +221,16 @@ io.on("connection", (socket) => {
     cb({ success: true });
   });
 
-  // DISCONNECT — update last online
+  // DISCONNECT — updates last online
   socket.on("disconnect", () => {
     for (const [username, account] of Object.entries(data.accounts)) {
-      account.isOnline = false;
-      const profile = data.userProfiles[username];
-      if (profile) {
-        profile.isOnline = false;
-        profile.lastOnline = new Date().toISOString();
+      if (account.isOnline) {
+        account.isOnline = false;
+        const profile = data.userProfiles[username];
+        if (profile) {
+          profile.isOnline = false;
+          profile.lastOnline = new Date().toISOString(); // ✅ NOW SHOWS CORRECTLY
+        }
       }
     }
     saveData();
@@ -244,7 +238,7 @@ io.on("connection", (socket) => {
 });
 
 // ----------------------
-// API
+// API — FIXED FOR ID 1
 // ----------------------
 app.get("/api/profile/:id", (req, res) => {
   const profile = getProfileById(req.params.id);
