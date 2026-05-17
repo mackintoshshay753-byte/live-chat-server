@@ -23,7 +23,8 @@ router.get("/search/users", (req, res) => {
     if (username.toLowerCase().includes(keyword)) {
       matches.push({
         id: info.id,
-        username: username
+        username,
+        online: onlineUsers.has(username)
       });
     }
   });

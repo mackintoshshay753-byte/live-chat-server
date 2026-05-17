@@ -2,30 +2,42 @@ const bcrypt = require('bcrypt');
 const { data, saveData } = require('../data');
 const { clean, createProfile } = require('../helpers');
 
+const onlineUsers = new Set();
+
 function setupSockets(io) {
   io.on("connection", (socket) => {
     console.log("🔌 User connected");
 
     // LOGIN
     socket.on("login", async ({ username, password }, cb) => {
-      try {
-        const name = clean(username);
-        const lowerName = name.toLowerCase();
-        const account = data.accounts[name];
+    try {
+      const name = clean(username);
+      const lowerName = name.toLowerCase();
+      const account = data.accounts[name];
 
-        if (!account || !data.registeredNames[lowerName])
-          return safeCb(cb, { success: false, message: "Account not found" });
+      if (!account || !data.registeredNames[lowerName])
+        return safeCb(cb, { success: false, message: "Account not found" });
 
-        const validPassword = await bcrypt.compare(password, account.hash);
-        if (!validPassword)
-          return safeCb(cb, { success: false, message: "Incorrect password" });
+      const validPassword = await bcrypt.compare(password, account.hash);
+      if (!validPassword)
+        return safeCb(cb, { success: false, message: "Incorrect password" });
 
-        safeCb(cb, { success: true, username: name, id: account.id, theme: account.theme });
-      } catch (err) {
-        console.error("Login Error:", err);
-        safeCb(cb, { success: false, message: "Server error — try again" });
-      }
-    });
+      socket.data.username = name;
+      onlineUsers.add(name);
+
+      safeCb(cb, { success: true, username: name, id: account.id, theme: account.theme });
+    } catch (err) {
+      console.error("Login Error:", err);
+      safeCb(cb, { success: false, message: "Server error — try again" });
+    }
+  });
+
+  socket.on("disconnect", () => {
+    if (socket.data.username) {
+      onlineUsers.delete(socket.data.username);
+    }
+  });
+
 
     // SIGNUP
     socket.on("signup", async ({ username, password }, cb) => {
