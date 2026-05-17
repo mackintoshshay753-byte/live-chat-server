@@ -35,8 +35,7 @@ const DEFAULT_DATA = {
   registeredNames: {},
   accounts: {},
   userProfiles: {},
-  usernameToId: {},
-  activeConnections: {} // Track every open tab/connection
+  usernameToId: {}
 };
 
 let data = { ...DEFAULT_DATA };
@@ -64,10 +63,7 @@ function loadData() {
 
 function saveData() {
   try {
-    // Remove temp connection data before saving
-    const saveCopy = JSON.parse(JSON.stringify(data));
-    saveCopy.activeConnections = {};
-    fs.writeFileSync(DATA_PATH, JSON.stringify(saveCopy, null, 2), 'utf8');
+    fs.writeFileSync(DATA_PATH, JSON.stringify(data, null, 2), 'utf8');
   } catch (err) {
     console.error("❌ Save failed:", err.message);
   }
@@ -90,9 +86,7 @@ function createProfile(username) {
     id,
     username,
     joinDate: new Date().toISOString(),
-    theme: "light",
-    lastOnline: null,
-    isOnline: false
+    theme: "light"
   };
 
   data.userProfiles[username] = profile;
@@ -106,35 +100,10 @@ function getProfileById(id) {
   return Object.values(data.userProfiles).find(p => Number(p.id) === id) || null;
 }
 
-// ✅ Update online status: ONLINE = ANY connection open; OFFLINE = NO connections
-function updateOnlineStatus(username) {
-  const count = Object.values(data.activeConnections).filter(u => u === username).length;
-  const profile = data.userProfiles[username];
-  if (!profile) return;
-
-  if (count > 0) {
-    profile.isOnline = true;
-    // Keep lastOnline as-is while online
-  } else {
-    if (profile.isOnline) { // Only set time when actually going offline
-      profile.isOnline = false;
-      profile.lastOnline = new Date().toISOString();
-      saveData();
-    }
-  }
-}
-
 // ----------------------
-// SOCKET EVENTS — FIXED PRESENCE DETECTION
+// SOCKET EVENTS
 // ----------------------
 io.on("connection", (socket) => {
-
-  // ✅ Runs on EVERY page load (home, settings, profile)
-  socket.on("iamhere", (username) => {
-    if (!username) return;
-    data.activeConnections[socket.id] = username;
-    updateOnlineStatus(username);
-  });
 
   // SIGNUP
   socket.on("signup", async ({ username, password }, cb) => {
@@ -237,16 +206,10 @@ io.on("connection", (socket) => {
     cb({ success: true });
   });
 
-  // ✅ DISCONNECT — only mark offline when NO tabs are open
-  socket.on("disconnect", () => {
-    const username = data.activeConnections[socket.id];
-    delete data.activeConnections[socket.id];
-    if (username) updateOnlineStatus(username);
-  });
 });
 
 // ----------------------
-// API — ID 1 WORKS 100%
+// API
 // ----------------------
 app.get("/api/profile/:id", (req, res) => {
   const profile = getProfileById(req.params.id);
