@@ -24,7 +24,20 @@ function createProfile(username) {
 
 function getProfileById(id) {
   id = Number(id);
-  return Object.values(data.userProfiles).find(p => Number(p.id) === id) || null;
+  const profile = Object.values(data.userProfiles).find(p => Number(p.id) === id);
+  if (!profile) return null;
+
+  // ✅ Always return the CURRENT username from accounts, never old one
+  const currentUsername = Object.keys(data.accounts).find(
+    name => data.accounts[name].id === profile.id
+  );
+
+  return {
+    id: profile.id,
+    username: currentUsername || profile.username,
+    joinDate: profile.joinDate,
+    theme: profile.theme
+  };
 }
 
 module.exports = { clean, createProfile, getProfileById };

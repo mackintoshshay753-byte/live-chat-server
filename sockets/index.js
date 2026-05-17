@@ -11,7 +11,7 @@ function setupSockets(io) {
         const name = clean(username);
         const lowerName = name.toLowerCase();
 
-        // ✅ UPDATED: 3-20 characters instead of 2-20
+        // ✅ 3-20 characters, same everywhere
         if (name.length < 3 || name.length > 20)
           return safeCb(cb, { success: false, message: "Username must be 3-20 characters" });
         if (/\s/.test(name))
@@ -75,7 +75,7 @@ function setupSockets(io) {
       }
     });
 
-    // CHANGE USERNAME
+    // ✅ CHANGE USERNAME — FULLY FIXED & SYNCED EVERYWHERE
     socket.on("change username", ({ oldName, newName }, cb) => {
       try {
         const cleanOld = clean(oldName);
@@ -83,39 +83,57 @@ function setupSockets(io) {
         const oldLower = cleanOld.toLowerCase();
         const newLower = cleanNew.toLowerCase();
 
-        // ✅ UPDATED: 3-20 characters instead of 2-20
+        // ✅ Validation matches signup/settings
         if (cleanNew.length < 3 || cleanNew.length > 20)
           return safeCb(cb, { success: false, message: "Name must be 3-20 characters" });
+        if (!/^[a-zA-Z0-9_]+$/.test(cleanNew))
+          return safeCb(cb, { success: false, message: "Only letters, numbers and underscores" });
         if (data.registeredNames[newLower])
           return safeCb(cb, { success: false, message: "Name already taken" });
         if (oldLower === newLower)
           return safeCb(cb, { success: false, message: "Same as current name" });
+        if (!data.accounts[cleanOld])
+          return safeCb(cb, { success: false, message: "Original user not found" });
 
+        // 1. Update registered names list
         delete data.registeredNames[oldLower];
         data.registeredNames[newLower] = true;
 
-        data.accounts[cleanNew] = data.accounts[cleanOld];
+        // 2. Update account entry
+        const oldAccountData = data.accounts[cleanOld];
         delete data.accounts[cleanOld];
+        data.accounts[cleanNew] = oldAccountData;
+        data.accounts[cleanNew].username = cleanNew; // ✅ Important!
 
+        // 3. Update profile entry — THIS WAS ALMOST RIGHT, NOW PERFECT
         const oldProfile = data.userProfiles[cleanOld];
         if (oldProfile) {
-          oldProfile.username = cleanNew;
-          data.userProfiles[cleanNew] = oldProfile;
-          data.usernameToId[cleanNew] = oldProfile.id;
-          delete data.userProfiles[cleanOld];
-          delete data.usernameToId[cleanOld];
+          delete data.userProfiles[cleanOld];          // Remove old key
+          oldProfile.username = cleanNew;             // Update inside object
+          data.userProfiles[cleanNew] = oldProfile;    // Save under new key
+          
+          // ✅ Update ID map too
+          if (data.usernameToId[cleanOld]) {
+            const id = data.usernameToId[cleanOld];
+            delete data.usernameToId[cleanOld];
+            data.usernameToId[cleanNew] = id;
+          }
         }
 
+        // 4. Save everything
         saveData();
-        safeCb(cb, { success: true, newName: cleanNew });
+
+        // ✅ Broadcast update so profile/settings pages refresh instantly
         io.emit("username updated", { oldName: cleanOld, newName: cleanNew });
+
+        safeCb(cb, { success: true, newName: cleanNew });
       } catch (err) {
         console.error("Change Username Error:", err);
         safeCb(cb, { success: false, message: "Server error — try again" });
       }
     });
 
-    // ✅ CHANGE PASSWORD — 100% FIXED, NO CRASHES
+    // ✅ CHANGE PASSWORD — 100% FIXED
     socket.on("change password", async ({ username, newPassword }, cb) => {
       try {
         const name = clean(username);
@@ -133,7 +151,6 @@ function setupSockets(io) {
         account.hash = await bcrypt.hash(newPassword, 10);
         saveData();
 
-        // ✅ Success message sent
         safeCb(cb, { success: true, message: "Password updated successfully" });
 
       } catch (err) {
@@ -145,7 +162,7 @@ function setupSockets(io) {
   });
 }
 
-// ✅ HELPER: Only call callback if it exists — THIS FIXES THE CRASH FOREVER
+// ✅ Safe callback helper
 function safeCb(cb, data) {
   if (typeof cb === "function") {
     cb(data);
