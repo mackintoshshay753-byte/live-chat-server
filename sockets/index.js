@@ -3,15 +3,66 @@ const { data, saveData } = require('../data');
 const { clean, createProfile } = require('../helpers');
 
 function setupSockets(io) {
-  io.on("connection", (socket) => {
+  // ✅ Initialize online users list if it doesn't exist
+  if (!data.onlineUsers) data.onlineUsers = [];
 
-    // SIGNUP
+  io.on("connection", (socket) => {
+    console.log("🔌 User connected");
+
+    // --------------------------
+    // ✅ LOGIN — Mark user as ONLINE
+    // --------------------------
+    socket.on("login", async ({ username, password }, cb) => {
+      try {
+        const name = clean(username);
+        const lowerName = name.toLowerCase();
+        const account = data.accounts[name];
+
+        if (!account || !data.registeredNames[lowerName])
+          return safeCb(cb, { success: false, message: "Account not found" });
+
+        const validPassword = await bcrypt.compare(password, account.hash);
+        if (!validPassword)
+          return safeCb(cb, { success: false, message: "Incorrect password" });
+
+        // ✅ Add to online list if not already there
+        const userId = account.id;
+        if (!data.onlineUsers.includes(userId)) {
+          data.onlineUsers.push(userId);
+          saveData(); // Save so it persists
+        }
+
+        // ✅ Store user ID on this socket for later
+        socket.userId = userId;
+        socket.username = name;
+
+        safeCb(cb, { success: true, username: name, id: account.id, theme: account.theme });
+      } catch (err) {
+        console.error("Login Error:", err);
+        safeCb(cb, { success: false, message: "Server error — try again" });
+      }
+    });
+
+    // --------------------------
+    // ✅ DISCONNECT — Mark user as OFFLINE
+    // --------------------------
+    socket.on("disconnect", () => {
+      console.log("🔌 User disconnected");
+      if (socket.userId && data.onlineUsers) {
+        // ✅ Remove from online list
+        data.onlineUsers = data.onlineUsers.filter(id => id !== socket.userId);
+        saveData();
+      }
+    });
+
+    // --------------------------
+    // SIGNUP — unchanged
+    // --------------------------
     socket.on("signup", async ({ username, password }, cb) => {
       try {
         const name = clean(username);
         const lowerName = name.toLowerCase();
 
-        // ✅ 3-20 characters, same everywhere
         if (name.length < 3 || name.length > 20)
           return safeCb(cb, { success: false, message: "Username must be 3-20 characters" });
         if (/\s/.test(name))
@@ -41,28 +92,9 @@ function setupSockets(io) {
       }
     });
 
-    // LOGIN
-    socket.on("login", async ({ username, password }, cb) => {
-      try {
-        const name = clean(username);
-        const lowerName = name.toLowerCase();
-        const account = data.accounts[name];
-
-        if (!account || !data.registeredNames[lowerName])
-          return safeCb(cb, { success: false, message: "Account not found" });
-
-        const validPassword = await bcrypt.compare(password, account.hash);
-        if (!validPassword)
-          return safeCb(cb, { success: false, message: "Incorrect password" });
-
-        safeCb(cb, { success: true, username: name, id: account.id, theme: account.theme });
-      } catch (err) {
-        console.error("Login Error:", err);
-        safeCb(cb, { success: false, message: "Server error — try again" });
-      }
-    });
-
-    // SAVE THEME
+    // --------------------------
+    // SAVE THEME — unchanged
+    // --------------------------
     socket.on("save-theme", ({ theme, username }) => {
       try {
         const account = data.accounts[username];
@@ -75,7 +107,9 @@ function setupSockets(io) {
       }
     });
 
-    // ✅ CHANGE USERNAME — FULLY FIXED & SYNCED EVERYWHERE
+    // --------------------------
+    // CHANGE USERNAME — unchanged
+    // --------------------------
     socket.on("change username", ({ oldName, newName }, cb) => {
       try {
         const cleanOld = clean(oldName);
@@ -83,7 +117,6 @@ function setupSockets(io) {
         const oldLower = cleanOld.toLowerCase();
         const newLower = cleanNew.toLowerCase();
 
-        // ✅ Validation matches signup/settings
         if (cleanNew.length < 3 || cleanNew.length > 20)
           return safeCb(cb, { success: false, message: "Name must be 3-20 characters" });
         if (!/^[a-zA-Z0-9_]+$/.test(cleanNew))
@@ -95,24 +128,20 @@ function setupSockets(io) {
         if (!data.accounts[cleanOld])
           return safeCb(cb, { success: false, message: "Original user not found" });
 
-        // 1. Update registered names list
         delete data.registeredNames[oldLower];
         data.registeredNames[newLower] = true;
 
-        // 2. Update account entry
         const oldAccountData = data.accounts[cleanOld];
         delete data.accounts[cleanOld];
         data.accounts[cleanNew] = oldAccountData;
-        data.accounts[cleanNew].username = cleanNew; // ✅ Important!
+        data.accounts[cleanNew].username = cleanNew;
 
-        // 3. Update profile entry — THIS WAS ALMOST RIGHT, NOW PERFECT
         const oldProfile = data.userProfiles[cleanOld];
         if (oldProfile) {
-          delete data.userProfiles[cleanOld];          // Remove old key
-          oldProfile.username = cleanNew;             // Update inside object
-          data.userProfiles[cleanNew] = oldProfile;    // Save under new key
+          delete data.userProfiles[cleanOld];
+          oldProfile.username = cleanNew;
+          data.userProfiles[cleanNew] = oldProfile;
           
-          // ✅ Update ID map too
           if (data.usernameToId[cleanOld]) {
             const id = data.usernameToId[cleanOld];
             delete data.usernameToId[cleanOld];
@@ -120,10 +149,7 @@ function setupSockets(io) {
           }
         }
 
-        // 4. Save everything
         saveData();
-
-        // ✅ Broadcast update so profile/settings pages refresh instantly
         io.emit("username updated", { oldName: cleanOld, newName: cleanNew });
 
         safeCb(cb, { success: true, newName: cleanNew });
@@ -133,7 +159,9 @@ function setupSockets(io) {
       }
     });
 
-    // ✅ CHANGE PASSWORD — 100% FIXED
+    // --------------------------
+    // CHANGE PASSWORD — unchanged
+    // --------------------------
     socket.on("change password", async ({ username, newPassword }, cb) => {
       try {
         const name = clean(username);
@@ -162,7 +190,6 @@ function setupSockets(io) {
   });
 }
 
-// ✅ Safe callback helper
 function safeCb(cb, data) {
   if (typeof cb === "function") {
     cb(data);
