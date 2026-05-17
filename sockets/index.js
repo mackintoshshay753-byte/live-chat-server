@@ -2,22 +2,22 @@ const bcrypt = require('bcrypt');
 const { data, saveData } = require('../data');
 const { clean, createProfile } = require('../helpers');
 
-// Centralized tracking map for live website connections (username -> socket.id)
-const onlineUsers = new Map();
+const onlineUsers = new Set();
 
 function setupSockets(io) {
   io.on("connection", (socket) => {
     console.log("🔌 User connected");
-    let mappedUsername = null;
 
-    // Direct registration hook for page refreshes/views
     socket.on("verify-online", ({ username }) => {
       if (username) {
-        const name = clean(username);
-        if (data.accounts[name]) {
-          mappedUsername = name;
-          onlineUsers.set(name, socket.id);
-        }
+        socket.username = clean(username);
+        onlineUsers.add(socket.username);
+      }
+    });
+
+    socket.on("disconnect", () => {
+      if (socket.username) {
+        onlineUsers.delete(socket.username);
       }
     });
 
@@ -33,10 +33,6 @@ function setupSockets(io) {
         const validPassword = await bcrypt.compare(password, account.hash);
         if (!validPassword)
           return safeCb(cb, { success: false, message: "Incorrect password" });
-
-        // Save trace mapping state on login success
-        mappedUsername = name;
-        onlineUsers.set(name, socket.id);
 
         safeCb(cb, { success: true, username: name, id: account.id, theme: account.theme });
       } catch (err) {
@@ -71,10 +67,6 @@ function setupSockets(io) {
         };
         createProfile(name);
         saveData();
-
-        // Save state tracker on direct profile birth
-        mappedUsername = name;
-        onlineUsers.set(name, socket.id);
 
         safeCb(cb, { success: true, username: name, id });
       } catch (err) {
@@ -126,7 +118,7 @@ function setupSockets(io) {
           delete data.userProfiles[cleanOld];
           oldProfile.username = cleanNew;
           data.userProfiles[cleanNew] = oldProfile;
-          
+
           if (data.usernameToId[cleanOld]) {
             const id = data.usernameToId[cleanOld];
             delete data.usernameToId[cleanOld];
@@ -134,11 +126,10 @@ function setupSockets(io) {
           }
         }
 
-        // Shift active mapping to handle immediate name swaps fluidly
+        // Update onlineUsers set if the user was online
         if (onlineUsers.has(cleanOld)) {
           onlineUsers.delete(cleanOld);
-          onlineUsers.set(cleanNew, socket.id);
-          mappedUsername = cleanNew;
+          onlineUsers.add(cleanNew);
         }
 
         saveData();
@@ -175,14 +166,6 @@ function setupSockets(io) {
       }
     });
 
-    // Cleanup reference keys whenever a user disconnects or exits tabs
-    socket.on("disconnect", () => {
-      console.log("❌ User disconnected");
-      if (mappedUsername) {
-        onlineUsers.delete(mappedUsername);
-      }
-    });
-
   });
 }
 
@@ -190,5 +173,4 @@ function safeCb(cb, data) {
   if (typeof cb === "function") cb(data);
 }
 
-// Export named fields so route controls can inspect the connection maps directly
 module.exports = { setupSockets, onlineUsers };
