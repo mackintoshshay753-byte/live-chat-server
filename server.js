@@ -318,6 +318,25 @@ io.on("connection", (socket) => {
     socket.emit("theme-sync", data.userTheme[cleanNew] || "light");
   });
 
+  // ✅ NEW: Change Password Handler
+  socket.on("change password", ({ username, newPassword }, cb) => {
+    const name = clean(username);
+    const account = data.accounts[name];
+
+    if (!account) {
+      return socket.emit("change result", { success: false, message: "Account not found" });
+    }
+    if (newPassword.length < 8) {
+      return socket.emit("change result", { success: false, message: "Password must be at least 8 characters" });
+    }
+
+    // Update with new hashed password
+    account.hash = hashPassword(newPassword);
+    saveData();
+
+    socket.emit("change result", { success: true, type: "password" });
+  });
+
   socket.on("activity change", ({ active }) => {
     if (data.onlineSockets[socket.id]) {
       data.onlineSockets[socket.id].isActive = active;
