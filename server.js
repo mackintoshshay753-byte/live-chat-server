@@ -4,6 +4,7 @@ const http = require('http');
 const { Server } = require('socket.io');
 const cors = require('cors');
 const sanitizeHtml = require('sanitize-html');
+const fs = require('fs');
 const path = require('path');
 const { MongoClient } = require('mongodb');
 const bcrypt = require('bcrypt');
@@ -19,6 +20,7 @@ app.use(cors({
   credentials: true
 }));
 app.use(express.json({ limit: '10kb' }));
+// Serve static files
 app.use(express.static(path.join(__dirname, 'public')));
 
 const io = new Server(server, {
@@ -26,13 +28,15 @@ const io = new Server(server, {
 });
 
 // ----------------------
-// DATA STRUCTURE
+// PERSISTENT STORAGE FILE
 // ----------------------
+
+// Default data structure
 let data = {
   nextUserId: 1,
   onlineSockets: {},     // socketId → { username, isActive }
   registeredNames: {},   // lowercase → true
-  accounts: {},          // username → { id, hash, joinDate, theme, lastOnline, isOnline }
+  accounts: {},          // ✅ NEW: username → { id, hash, joinDate, theme, lastOnline, isOnline }
   friendData: {},        // username → [friendNames]
   pendingRequests: {},   // username → [requesterNames]
   userTheme: {},         // username → themeName
@@ -40,53 +44,53 @@ let data = {
   usernameToId: {}       // username → id
 };
 
-let dbCollection;
 const client = new MongoClient(process.env.MONGO_URI);
 
-// ----------------------
-// DATABASE FUNCTIONS
-// ----------------------
 async function connectDB() {
   try {
     await client.connect();
-    const db = client.db("livechat");
-    dbCollection = db.collection("appdata");
 
-    const existing = await dbCollection.findOne({ name: "mainData" });
+    const db = client.db("livechat");
+    const collection = db.collection("appdata");
+
+    const existing = await collection.findOne({ name: "mainData" });
 
     if (existing && existing.data) {
       data = existing.data;
-      // Clean up old state after restart
-      data.onlineSockets = {};
-      Object.values(data.accounts || {}).forEach(acc => acc.isOnline = false);
-      Object.values(data.userProfiles || {}).forEach(p => p.isOnline = false);
-      console.log("✅ MongoDB data loaded successfully");
+      console.log("✅ MongoDB data loaded");
     } else {
-      await dbCollection.insertOne({ name: "mainData", data });
-      console.log("📄 New MongoDB database created");
+      await collection.insertOne({
+        name: "mainData",
+        data
+      });
+      console.log("📄 MongoDB database created");
     }
 
+    global.dbCollection = collection;
+
   } catch (err) {
-    console.error("❌ MongoDB connection failed:", err.message);
-    process.exit(1);
+    console.error("❌ MongoDB connection failed:", err);
   }
 }
 
 async function saveData() {
-  if (!dbCollection) return;
-  try {
-    await dbCollection.updateOne(
-      { name: "mainData" },
-      { $set: { data } },
-      { upsert: true }
-    );
-  } catch (err) {
-    console.error("⚠️ Save failed:", err.message);
-  }
+  if (!global.dbCollection) return;
+
+  await global.dbCollection.updateOne(
+    { name: "mainData" },
+    { $set: { data } },
+    { upsert: true }
+  );
 }
 
+connectDB();
+
 // ----------------------
-// HELPERS
+// Security Helpers
+// ----------------------
+
+// ----------------------
+// Helpers
 // ----------------------
 function clean(input) {
   return sanitizeHtml(String(input || '').trim(), { allowedTags: [], allowedAttributes: {} });
@@ -107,7 +111,7 @@ function broadcastOnline() {
 function createProfile(username) {
   if (data.userProfiles[username]) return data.userProfiles[username];
 
-  const id = data.nextUserId++;
+  const id = data.nextUserId++; // ✅ INCREASES BY 1, PERMANENT
   const profile = {
     id,
     username,
@@ -119,7 +123,8 @@ function createProfile(username) {
 
   data.userProfiles[username] = profile;
   data.usernameToId[username] = id;
-  saveData();
+  saveData(); // Save immediately
+
   return profile;
 }
 
@@ -146,22 +151,32 @@ function sendPendingRequests(username, socketId) {
 }
 
 // ----------------------
-// SOCKET EVENTS
+// Socket.IO Events
 // ----------------------
 io.on("connection", (socket) => {
   console.log("Connected:", socket.id);
 
-  // Signup
+  // ✅ NEW: Signup
   socket.on("signup", async ({ username, password }, cb) => {
     const name = clean(username);
     const lowerName = name.toLowerCase();
 
     // Validation
-    if (name.length < 2 || name.length > 20) return cb({ success: false, message: "Username must be 2-20 characters" });
-    if (/\s/.test(name)) return cb({ success: false, message: "No spaces allowed" });
-    if (!/^[a-zA-Z0-9_]+$/.test(name)) return cb({ success: false, message: "Only letters, numbers and underscores" });
-    if (password.length < 8) return cb({ success: false, message: "Password must be at least 8 characters" });
-    if (data.registeredNames[lowerName]) return cb({ success: false, message: "Username already taken" });
+    if (name.length < 2 || name.length > 20) {
+      return cb({ success: false, message: "Username must be 2-20 characters" });
+    }
+    if (/\s/.test(name)) {
+      return cb({ success: false, message: "No spaces allowed" });
+    }
+    if (!/^[a-zA-Z0-9_]+$/.test(name)) {
+      return cb({ success: false, message: "Only letters, numbers and underscores" });
+    }
+    if (password.length < 8) {
+      return cb({ success: false, message: "Password must be at least 8 characters" });
+    }
+    if (data.registeredNames[lowerName]) {
+      return cb({ success: false, message: "Username already taken" });
+    }
 
     // Create account
     const id = data.nextUserId++;
@@ -178,29 +193,27 @@ io.on("connection", (socket) => {
     data.friendData[name] = [];
     data.pendingRequests[name] = [];
     data.userTheme[name] = "light";
-    await saveData();
+    saveData();
 
     cb({ success: true, username: name, id });
   });
 
-  // Login
+  // ✅ NEW: Login
   socket.on("login", async ({ username, password }, cb) => {
     const name = clean(username);
     const lowerName = name.toLowerCase();
-    // Find account case‑insensitively
-    const account = Object.keys(data.accounts).find(k => k.toLowerCase() === lowerName)
-      ? data.accounts[Object.keys(data.accounts).find(k => k.toLowerCase() === lowerName)]
-      : null;
+    const account = data.accounts[name];
 
     if (!account || !data.registeredNames[lowerName]) {
       return cb({ success: false, message: "Account not found" });
     }
     const validPassword = await bcrypt.compare(password, account.hash);
-    if (!validPassword) {
-      return cb({ success: false, message: "Incorrect password" });
-    }
 
-    cb({ success: true, username: Object.keys(data.accounts).find(k => k.toLowerCase() === lowerName), id: account.id, theme: account.theme });
+if (!validPassword) {
+  return cb({ success: false, message: "Incorrect password" });
+}
+
+    cb({ success: true, username: name, id: account.id, theme: account.theme });
   });
 
   socket.on("get online", () => {
@@ -210,7 +223,9 @@ io.on("connection", (socket) => {
   socket.on("join", (rawName) => {
     const name = clean(rawName);
     const account = data.accounts[name];
-    if (!account) return;
+    if (!account) return; // only registered accounts can join
+
+    const lowerName = name.toLowerCase();
 
     data.onlineSockets[socket.id] = { username: name, isActive: true };
     account.isOnline = true;
@@ -239,15 +254,21 @@ io.on("connection", (socket) => {
     saveData();
   });
 
-  socket.on("change username", async ({ oldName, newName }) => {
+  socket.on("change username", ({ oldName, newName }) => {
     const cleanOld = clean(oldName);
     const cleanNew = clean(newName);
     const oldLower = cleanOld.toLowerCase();
     const newLower = cleanNew.toLowerCase();
 
-    if (cleanNew.length < 2 || cleanNew > 20) return socket.emit("change result", { success: false, message: "Name must be 2-20 characters" });
-    if (data.registeredNames[newLower]) return socket.emit("change result", { success: false, message: "Name already taken" });
-    if (oldLower === newLower) return socket.emit("change result", { success: false, message: "Same as current name" });
+    if (cleanNew.length < 2 || cleanNew > 20) {
+      return socket.emit("change result", { success: false, message: "Name must be 2-20 characters" });
+    }
+    if (data.registeredNames[newLower]) {
+      return socket.emit("change result", { success: false, message: "Name already taken" });
+    }
+    if (oldLower === newLower) {
+      return socket.emit("change result", { success: false, message: "Same as current name" });
+    }
 
     // Update registered names
     delete data.registeredNames[oldLower];
@@ -261,6 +282,7 @@ io.on("connection", (socket) => {
     const oldFriends = data.friendData[cleanOld] || [];
     data.friendData[cleanNew] = oldFriends;
     delete data.friendData[cleanOld];
+
     Object.keys(data.friendData).forEach(user => {
       const idx = data.friendData[user].indexOf(cleanOld);
       if (idx !== -1) data.friendData[user][idx] = cleanNew;
@@ -270,6 +292,7 @@ io.on("connection", (socket) => {
     const oldPending = data.pendingRequests[cleanOld] || [];
     data.pendingRequests[cleanNew] = oldPending;
     delete data.pendingRequests[cleanOld];
+
     Object.keys(data.pendingRequests).forEach(user => {
       const idx = data.pendingRequests[user].indexOf(cleanOld);
       if (idx !== -1) data.pendingRequests[user][idx] = cleanNew;
@@ -294,7 +317,7 @@ io.on("connection", (socket) => {
       if (d.username === cleanOld) d.username = cleanNew;
     });
 
-    await saveData();
+    saveData();
     io.emit("system", `${cleanOld} changed name to ${cleanNew}`);
     io.emit("username updated", { oldName: cleanOld, newName: cleanNew });
 
@@ -304,14 +327,22 @@ io.on("connection", (socket) => {
     socket.emit("theme-sync", data.userTheme[cleanNew] || "light");
   });
 
+  // ✅ NEW: Change Password Handler
   socket.on("change password", async ({ username, newPassword }, cb) => {
     const name = clean(username);
     const account = data.accounts[name];
-    if (!account) return socket.emit("change result", { success: false, message: "Account not found" });
-    if (newPassword.length < 8) return socket.emit("change result", { success: false, message: "Password must be at least 8 characters" });
 
+    if (!account) {
+      return socket.emit("change result", { success: false, message: "Account not found" });
+    }
+    if (newPassword.length < 8) {
+      return socket.emit("change result", { success: false, message: "Password must be at least 8 characters" });
+    }
+
+    // Update with new hashed password
     account.hash = await bcrypt.hash(newPassword, 10);
-    await saveData();
+    saveData();
+
     socket.emit("change result", { success: true, type: "password" });
   });
 
@@ -322,9 +353,11 @@ io.on("connection", (socket) => {
     }
   });
 
+  // ✅ FIXED: Only send once, no duplicates
   socket.on("chat message", (dataMsg) => {
     const userData = data.onlineSockets[socket.id];
     if (!userData || !dataMsg.text) return;
+
     const profile = data.userProfiles[userData.username];
     const msgData = {
       from: userData.username,
@@ -332,6 +365,7 @@ io.on("connection", (socket) => {
       text: clean(dataMsg.text),
       time: new Date().toISOString()
     };
+
     io.emit("chat message", msgData);
   });
 
@@ -358,7 +392,7 @@ io.on("connection", (socket) => {
     }
   });
 
-  socket.on("friend accept", async ({ user, from }) => {
+  socket.on("friend accept", ({ user, from }) => {
     if (data.pendingRequests[user]) {
       data.pendingRequests[user] = data.pendingRequests[user].filter(f => f !== from);
     }
@@ -366,7 +400,7 @@ io.on("connection", (socket) => {
     if (!data.friendData[from]) data.friendData[from] = [];
     if (!data.friendData[user].includes(from)) data.friendData[user].push(from);
     if (!data.friendData[from].includes(user)) data.friendData[from].push(user);
-    await saveData();
+    saveData();
 
     io.emit("friend added", { friend: from, forUser: user });
     io.emit("friend added", { friend: user, forUser: from });
@@ -377,10 +411,10 @@ io.on("connection", (socket) => {
     if (fromSocket) io.to(fromSocket).emit("friends list", data.friendData[from]);
   });
 
-  socket.on("friend decline", async ({ user, from }) => {
+  socket.on("friend decline", ({ user, from }) => {
     if (data.pendingRequests[user]) {
       data.pendingRequests[user] = data.pendingRequests[user].filter(f => f !== from);
-      await saveData();
+      saveData();
     }
     const senderSocket = findSocketIdByUsername(from);
     if (senderSocket) {
@@ -388,10 +422,14 @@ io.on("connection", (socket) => {
     }
   });
 
-  socket.on("unfriend", async ({ user, friend }) => {
-    if (data.friendData[user]) data.friendData[user] = data.friendData[user].filter(f => f !== friend);
-    if (data.friendData[friend]) data.friendData[friend] = data.friendData[friend].filter(f => f !== user);
-    await saveData();
+  socket.on("unfriend", ({ user, friend }) => {
+    if (data.friendData[user]) {
+      data.friendData[user] = data.friendData[user].filter(f => f !== friend);
+    }
+    if (data.friendData[friend]) {
+      data.friendData[friend] = data.friendData[friend].filter(f => f !== user);
+    }
+    saveData();
 
     io.emit("friend removed", { friend, forUser: user });
     io.emit("friend removed", { friend: user, forUser: friend });
@@ -402,7 +440,7 @@ io.on("connection", (socket) => {
     if (friendSocket) io.to(friendSocket).emit("friends list", data.friendData[friend]);
   });
 
-  socket.on("disconnect", async () => {
+  socket.on("disconnect", () => {
     const d = data.onlineSockets[socket.id];
     if (d) {
       const account = data.accounts[d.username];
@@ -422,23 +460,32 @@ io.on("connection", (socket) => {
   });
 });
 
-// API
+// ----------------------
+// API — ONLY BY ID
+// ----------------------
 app.get("/api/profile/:id", (req, res) => {
   const profile = getProfileById(req.params.id);
   if (!profile) return res.status(404).json({ error: "User not found" });
   res.json(profile);
 });
 
+// ----------------------
 // Pages
-app.get("/", (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
-app.get("/home", (req, res) => res.sendFile(path.join(__dirname, 'public', 'home.html')));
-app.get("/settings", (req, res) => res.sendFile(path.join(__dirname, 'public', 'settings.html')));
-app.get("/users/profile", (req, res) => res.sendFile(path.join(__dirname, 'public', 'profile.html')));
+// ----------------------
+app.get("/", (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+app.get("/home", (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'home.html'));
+});
+app.get("/settings", (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'settings.html'));
+});
+app.get("/users/profile", (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'profile.html'));
+});
 
-// Start server only after DB is ready
-async function startServer() {
-  await connectDB();
-  server.listen(PORT, () => console.log("✅ Server running on port", PORT));
-}
-
-startServer();
+// ----------------------
+// Start Server
+// ----------------------
+server.listen(PORT, () => console.log("✅ Server running on port", PORT));
