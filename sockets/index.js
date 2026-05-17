@@ -2,7 +2,9 @@ const bcrypt = require('bcrypt');
 const { data, saveData } = require('../data');
 const { clean, createProfile } = require('../helpers');
 
-const onlineUsers = new Set();
+// ✅ Import onlineUsers from routes so both places use the same set
+const routes = require('./routes');
+const onlineUsers = routes.onlineUsers;
 
 function setupSockets(io) {
   io.on("connection", (socket) => {
@@ -10,34 +12,33 @@ function setupSockets(io) {
 
     // LOGIN
     socket.on("login", async ({ username, password }, cb) => {
-    try {
-      const name = clean(username);
-      const lowerName = name.toLowerCase();
-      const account = data.accounts[name];
+      try {
+        const name = clean(username);
+        const lowerName = name.toLowerCase();
+        const account = data.accounts[name];
 
-      if (!account || !data.registeredNames[lowerName])
-        return safeCb(cb, { success: false, message: "Account not found" });
+        if (!account || !data.registeredNames[lowerName])
+          return safeCb(cb, { success: false, message: "Account not found" });
 
-      const validPassword = await bcrypt.compare(password, account.hash);
-      if (!validPassword)
-        return safeCb(cb, { success: false, message: "Incorrect password" });
+        const validPassword = await bcrypt.compare(password, account.hash);
+        if (!validPassword)
+          return safeCb(cb, { success: false, message: "Incorrect password" });
 
-      socket.data.username = name;
-      onlineUsers.add(name);
+        socket.data.username = name;
+        onlineUsers.add(name); // ✅ Updates shared set
 
-      safeCb(cb, { success: true, username: name, id: account.id, theme: account.theme });
-    } catch (err) {
-      console.error("Login Error:", err);
-      safeCb(cb, { success: false, message: "Server error — try again" });
-    }
-  });
+        safeCb(cb, { success: true, username: name, id: account.id, theme: account.theme });
+      } catch (err) {
+        console.error("Login Error:", err);
+        safeCb(cb, { success: false, message: "Server error — try again" });
+      }
+    });
 
-  socket.on("disconnect", () => {
-    if (socket.data.username) {
-      onlineUsers.delete(socket.data.username);
-    }
-  });
-
+    socket.on("disconnect", () => {
+      if (socket.data.username) {
+        onlineUsers.delete(socket.data.username); // ✅ Removes from shared set
+      }
+    });
 
     // SIGNUP
     socket.on("signup", async ({ username, password }, cb) => {
