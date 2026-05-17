@@ -69,42 +69,53 @@ io.on("connection", (socket) => {
 
   // JOIN — load friends + pending requests + ✅ THEME
   socket.on("join", (rawName) => {
-    const name = clean(rawName);
-    const lowerName = name.toLowerCase();
-
-    if (name.length < 2 || name.length > 20) {
-      return socket.emit("join result", { success: false, message: "Invalid name (2-20 chars)" });
-    }
-
-    onlineSockets.set(socket.id, { username: name, isActive: true });
-
-    // Existing user
-    if (registeredNames.has(lowerName)) {
-      socket.emit("friends list", friendData.get(name) || []);
-      
-      // ✅ CRITICAL: SEND WHATEVER THEME WE HAVE STORED FOREVER — NEVER RESET TO LIGHT
-      socket.emit("theme-sync", userTheme.get(name) || "light"); 
-      
-      sendPendingRequests(name, socket.id);
-      socket.emit("join result", { success: true });
-      broadcastOnline();
-      return;
-    }
-
-    // New user
-    registeredNames.add(lowerName);
-    friendData.set(name, []);
-    pendingRequests.set(name, []);
-    
-    // ✅ Set default ONLY for NEW users
-    userTheme.set(name, "light"); 
-    
-    socket.emit("friends list", []);
-    socket.emit("theme-sync", "light");
-    socket.emit("join result", { success: true });
-    socket.broadcast.emit("system", `${name} joined`);
-    broadcastOnline();
+  const name = clean(rawName);
+  const lowerName = name.toLowerCase();
+  // VALIDATION
+  if (name.length < 2 || name.length > 20) {
+    return socket.emit("join result", {
+      success: false,
+      message: "Username must be 2-20 characters"
+    });
+  }
+  // NO SPACES
+  if (/\s/.test(name)) {
+    return socket.emit("join result", {
+      success: false,
+      message: "Usernames cannot contain spaces"
+    });
+  }
+  // ONLY LETTERS NUMBERS _
+  if (!/^[a-zA-Z0-9_]+$/.test(name)) {
+    return socket.emit("join result", {
+      success: false,
+      message: "Only letters, numbers, and underscores allowed"
+    });
+  }
+  // 🚫 BLOCK EXISTING USERNAMES
+  if (registeredNames.has(lowerName)) {
+    return socket.emit("join result", {
+      success: false,
+      message: "That username is already taken"
+    });
+  }
+  // ✅ CREATE NEW ACCOUNT
+  registeredNames.add(lowerName);
+  onlineSockets.set(socket.id, {
+    username: name,
+    isActive: true
   });
+  friendData.set(name, []);
+  pendingRequests.set(name, []);
+  userTheme.set(name, "light");
+  socket.emit("friends list", []);
+  socket.emit("theme-sync", "light");
+  socket.emit("join result", {
+    success: true
+  });
+  socket.broadcast.emit("system", `${name} joined`);
+  broadcastOnline();
+});
 
   // ✅ SAVE THEME TO SERVER PERMANENTLY — FOREVER REMEMBERED
   socket.on("save-theme", ({ theme }) => {
