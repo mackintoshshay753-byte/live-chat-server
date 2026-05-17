@@ -10,7 +10,7 @@ router.get("/profile/:id", (req, res) => {
   res.json(profile);
 });
 
-// ✅ UPDATED SEARCH ROUTE — NOW INCLUDES ONLINE STATUS
+// ✅ UPDATED SEARCH ROUTE — keeps all your logic, just adds online status
 router.get("/search/users", (req, res) => {
   let keyword = clean(req.query.keyword || "");
   
@@ -28,13 +28,13 @@ router.get("/search/users", (req, res) => {
       matches.push({
         id: info.id,
         username: username,
-        // ✅ ADD THIS: send online status (exists in your data.online array)
+        // ✅ Added this one line — checks if user ID is in your data.online array
         online: Array.isArray(data.online) && data.online.includes(info.id)
       });
     }
   });
 
-  // Sort results A–Z
+  // Sort results A–Z — exactly as you had
   matches.sort((a, b) => a.username.localeCompare(b.username));
 
   res.json(matches);
