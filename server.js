@@ -26,29 +26,42 @@ const io = new Server(server, {
 });
 
 // ----------------------
-// STORAGE
+// STORAGE — DEFAULTS
 // ----------------------
 const DATA_PATH = path.join(__dirname, 'chat-data.json');
 
-let data = {
-  nextUserId: 1, // ✅ FIX: starts at 1, no missing ID 1
+// Default structure — NEVER CHANGE KEY NAMES HERE OR YOU BREAK OLD DATA
+const DEFAULT_DATA = {
+  nextUserId: 1,
   registeredNames: {},
   accounts: {},
   userProfiles: {},
   usernameToId: {}
 };
 
+let data = { ...DEFAULT_DATA };
+
+// ----------------------
+// SAFE LOAD & SAVE
+// ----------------------
 function loadData() {
-  if (fs.existsSync(DATA_PATH)) {
-    try {
-      const fileData = fs.readFileSync(DATA_PATH, 'utf8');
-      const parsed = JSON.parse(fileData);
-      data = { ...data, ...parsed };
-    } catch (err) {
-      console.error("Load error, starting fresh:", err.message);
-      saveData();
-    }
-  } else {
+  if (!fs.existsSync(DATA_PATH)) {
+    console.log("📄 No data file found — creating new one");
+    saveData();
+    return;
+  }
+
+  try {
+    const raw = fs.readFileSync(DATA_PATH, 'utf8');
+    const loaded = JSON.parse(raw);
+
+    // ✅ SAFELY MERGE — keeps old data, adds missing new keys
+    data = { ...DEFAULT_DATA, ...loaded };
+    console.log("✅ Data loaded successfully — accounts preserved");
+  } catch (err) {
+    console.error("⚠️ Corrupted or invalid data file — starting fresh (old file backed up)");
+    // Backup bad file so you don't lose it forever
+    fs.renameSync(DATA_PATH, DATA_PATH + `.backup-${Date.now()}.json`);
     saveData();
   }
 }
@@ -57,9 +70,11 @@ function saveData() {
   try {
     fs.writeFileSync(DATA_PATH, JSON.stringify(data, null, 2), 'utf8');
   } catch (err) {
-    console.error("Save error:", err.message);
+    console.error("❌ Failed to save data:", err.message);
   }
 }
+
+// Load ONCE at start
 loadData();
 
 // ----------------------
@@ -94,7 +109,7 @@ function getProfileById(id) {
 }
 
 // ----------------------
-// SOCKET EVENTS (ONLY LOGIN/SIGNUP/SETTINGS)
+// SOCKET EVENTS
 // ----------------------
 io.on("connection", (socket) => {
 
@@ -198,6 +213,8 @@ io.on("connection", (socket) => {
 
     saveData();
     cb({ success: true, newName: cleanNew });
+
+    io.emit("username updated", { oldName: cleanOld, newName: cleanNew });
   });
 
   // CHANGE PASSWORD
@@ -217,7 +234,10 @@ io.on("connection", (socket) => {
     for (const [username, account] of Object.entries(data.accounts)) {
       account.isOnline = false;
       const profile = data.userProfiles[username];
-      if (profile) profile.isOnline = false;
+      if (profile) {
+        profile.isOnline = false;
+        profile.lastOnline = new Date().toISOString();
+      }
     }
     saveData();
   });
