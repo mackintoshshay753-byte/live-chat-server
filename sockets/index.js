@@ -3,15 +3,13 @@ const { data, saveData } = require('../data');
 const { clean, createProfile } = require('../helpers');
 
 function setupSockets(io) {
-  // ✅ Initialize online users list if it doesn't exist
+  // ✅ Make sure list exists
   if (!data.onlineUsers) data.onlineUsers = [];
 
   io.on("connection", (socket) => {
     console.log("🔌 User connected");
 
-    // --------------------------
-    // ✅ LOGIN — Mark user as ONLINE
-    // --------------------------
+    // ✅ LOGIN — MARK AS ONLINE + SAVE
     socket.on("login", async ({ username, password }, cb) => {
       try {
         const name = clean(username);
@@ -25,14 +23,15 @@ function setupSockets(io) {
         if (!validPassword)
           return safeCb(cb, { success: false, message: "Incorrect password" });
 
-        // ✅ Add to online list if not already there
-        const userId = account.id;
+        // ✅ ADD TO ONLINE LIST — ENSURE IT'S A NUMBER
+        const userId = Number(account.id);
         if (!data.onlineUsers.includes(userId)) {
           data.onlineUsers.push(userId);
-          saveData(); // Save so it persists
+          saveData(); // ✅ SAVE TO FILE
+          console.log("✅ ONLINE NOW:", username, "(ID:"+userId+")");
         }
 
-        // ✅ Store user ID on this socket for later
+        // ✅ REMEMBER THIS USER ON THE SOCKET
         socket.userId = userId;
         socket.username = name;
 
@@ -43,20 +42,23 @@ function setupSockets(io) {
       }
     });
 
-    // --------------------------
-    // ✅ DISCONNECT — Mark user as OFFLINE
-    // --------------------------
+    // ✅ DISCONNECT — MARK AS OFFLINE + SAVE
     socket.on("disconnect", () => {
       console.log("🔌 User disconnected");
-      if (socket.userId && data.onlineUsers) {
-        // ✅ Remove from online list
-        data.onlineUsers = data.onlineUsers.filter(id => id !== socket.userId);
-        saveData();
+      if (socket.userId) {
+        const userId = Number(socket.userId);
+        const oldLength = data.onlineUsers.length;
+        data.onlineUsers = data.onlineUsers.filter(id => Number(id) !== userId);
+        
+        if (data.onlineUsers.length !== oldLength) {
+          saveData(); // ✅ SAVE TO FILE
+          console.log("❌ OFFLINE NOW:", socket.username, "(ID:"+userId+")");
+        }
       }
     });
 
     // --------------------------
-    // SIGNUP — unchanged
+    // REST IS 100% YOUR ORIGINAL CODE — DO NOT CHANGE
     // --------------------------
     socket.on("signup", async ({ username, password }, cb) => {
       try {
@@ -92,9 +94,6 @@ function setupSockets(io) {
       }
     });
 
-    // --------------------------
-    // SAVE THEME — unchanged
-    // --------------------------
     socket.on("save-theme", ({ theme, username }) => {
       try {
         const account = data.accounts[username];
@@ -107,9 +106,6 @@ function setupSockets(io) {
       }
     });
 
-    // --------------------------
-    // CHANGE USERNAME — unchanged
-    // --------------------------
     socket.on("change username", ({ oldName, newName }, cb) => {
       try {
         const cleanOld = clean(oldName);
@@ -159,9 +155,6 @@ function setupSockets(io) {
       }
     });
 
-    // --------------------------
-    // CHANGE PASSWORD — unchanged
-    // --------------------------
     socket.on("change password", async ({ username, newPassword }, cb) => {
       try {
         const name = clean(username);
@@ -191,9 +184,7 @@ function setupSockets(io) {
 }
 
 function safeCb(cb, data) {
-  if (typeof cb === "function") {
-    cb(data);
-  }
+  if (typeof cb === "function") cb(data);
 }
 
 module.exports = setupSockets;
