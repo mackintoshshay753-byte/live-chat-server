@@ -29,7 +29,7 @@ const io = new Server(server, {
 // ----------------------
 // PERSISTENT STORAGE FILE
 // ----------------------
-const DATA_PATH = path.join(__dirname, 'chat-data.json');
+const DATA_PATH = path.join('/app/data', 'chat-data.json');
 
 // Default data structure
 let data = {
