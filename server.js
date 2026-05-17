@@ -6,6 +6,7 @@ const cors = require('cors');
 const sanitizeHtml = require('sanitize-html');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto'); // ✅ added for password hashing
 
 const app = express();
 const server = http.createServer(app);
@@ -18,7 +19,7 @@ app.use(cors({
   credentials: true
 }));
 app.use(express.json({ limit: '10kb' }));
-// Serve profile page
+// Serve static files
 app.use(express.static(path.join(__dirname, 'public')));
 
 const io = new Server(server, {
@@ -35,11 +36,12 @@ let data = {
   nextUserId: 1,
   onlineSockets: {},     // socketId → { username, isActive }
   registeredNames: {},   // lowercase → true
+  accounts: {},          // ✅ NEW: username → { id, hash, joinDate, theme, lastOnline, isOnline }
   friendData: {},        // username → [friendNames]
   pendingRequests: {},   // username → [requesterNames]
   userTheme: {},         // username → themeName
-  userProfiles: {},     // username → profile
-  usernameToId: {}      // username → id
+  userProfiles: {},      // username → profile
+  usernameToId: {}       // username → id
 };
 
 // Load data from file if exists
@@ -74,6 +76,13 @@ function saveData() {
 loadData();
 
 // ----------------------
+// Security Helpers
+// ----------------------
+function hashPassword(password) {
+  return crypto.createHash('sha256').update(password).digest('hex');
+}
+
+// ----------------------
 // Helpers
 // ----------------------
 function clean(input) {
@@ -101,7 +110,7 @@ function createProfile(username) {
     username,
     joinDate: new Date().toISOString(),
     theme: "light",
-    lastOnline: null,
+    lastOnlineline: null,
     isOnline: false
   };
 
@@ -140,41 +149,77 @@ function sendPendingRequests(username, socketId) {
 io.on("connection", (socket) => {
   console.log("Connected:", socket.id);
 
+  // ✅ NEW: Signup
+  socket.on("signup", ({ username, password }, cb) => {
+    const name = clean(username);
+    const lowerName = name.toLowerCase();
+
+    // Validation
+    if (name.length < 2 || name.length > 20) {
+      return cb({ success: false, message: "Username must be 2-20 characters" });
+    }
+    if (/\s/.test(name)) {
+      return cb({ success: false, message: "No spaces allowed" });
+    }
+    if (!/^[a-zA-Z0-9_]+$/.test(name)) {
+      return cb({ success: false, message: "Only letters, numbers and underscores" });
+    }
+    if (password.length < 8) {
+      return cb({ success: false, message: "Password must be at least 8 characters" });
+    }
+    if (data.registeredNames[lowerName]) {
+      return cb({ success: false, message: "Username already taken" });
+    }
+
+    // Create account
+    const id = data.nextUserId++;
+    data.registeredNames[lowerName] = true;
+    data.accounts[name] = {
+      id,
+      hash: hashPassword(password),
+      joinDate: new Date().toISOString(),
+      theme: "light",
+      lastOnline: null,
+      isOnline: false
+    };
+    createProfile(name);
+    data.friendData[name] = [];
+    data.pendingRequests[name] = [];
+    data.userTheme[name] = "light";
+    saveData();
+
+    cb({ success: true, username: name, id });
+  });
+
+  // ✅ NEW: Login
+  socket.on("login", ({ username, password }, cb) => {
+    const name = clean(username);
+    const lowerName = name.toLowerCase();
+    const account = data.accounts[name];
+
+    if (!account || !data.registeredNames[lowerName]) {
+      return cb({ success: false, message: "Account not found" });
+    }
+    if (account.hash !== hashPassword(password)) {
+      return cb({ success: false, message: "Incorrect password" });
+    }
+
+    cb({ success: true, username: name, id: account.id, theme: account.theme });
+  });
+
   socket.on("get online", () => {
     socket.emit("online list", getOnlineUsers());
   });
 
   socket.on("join", (rawName) => {
     const name = clean(rawName);
+    const account = data.accounts[name];
+    if (!account) return; // only registered accounts can join
+
     const lowerName = name.toLowerCase();
 
-    if (name.length < 2 || name.length > 20) {
-      return socket.emit("join result", { success: false, message: "Username must be 2-20 characters" });
-    }
-    if (/\s/.test(name)) {
-      return socket.emit("join result", { success: false, message: "No spaces allowed" });
-    }
-    if (!/^[a-zA-Z0-9_]+$/.test(name)) {
-      return socket.emit("join result", { success: false, message: "Only letters, numbers and underscores" });
-    }
-
-    const existingSocketId = findSocketIdByUsername(name);
-    if (data.registeredNames[lowerName] && !existingSocketId) {
-      // Allow rejoin
-    } else if (data.registeredNames[lowerName]) {
-      return socket.emit("join result", { success: false, message: "Username already taken" });
-    }
-
-    if (!data.registeredNames[lowerName]) {
-      data.registeredNames[lowerName] = true;
-      createProfile(name);
-      data.friendData[name] = [];
-      data.pendingRequests[name] = [];
-      data.userTheme[name] = "light";
-      saveData();
-    }
-
     data.onlineSockets[socket.id] = { username: name, isActive: true };
+    account.isOnline = true;
     const profile = data.userProfiles[name];
     if (profile) {
       profile.isOnline = true;
@@ -182,7 +227,7 @@ io.on("connection", (socket) => {
     }
 
     socket.emit("friends list", data.friendData[name] || []);
-    socket.emit("theme-sync", data.userTheme[name] || "light");
+    socket.emit("theme-sync", account.theme || "light");
     socket.emit("join result", { success: true });
 
     sendPendingRequests(name, socket.id);
@@ -190,12 +235,12 @@ io.on("connection", (socket) => {
     broadcastOnline();
   });
 
-  socket.on("save-theme", ({ theme }) => {
-    const userData = data.onlineSockets[socket.id];
-    if (!userData) return;
-    data.userTheme[userData.username] = theme;
-    if (data.userProfiles[userData.username]) {
-      data.userProfiles[userData.username].theme = theme;
+  socket.on("save-theme", ({ theme, username }) => {
+    const account = data.accounts[username];
+    if (!account) return;
+    account.theme = theme;
+    if (data.userProfiles[username]) {
+      data.userProfiles[username].theme = theme;
     }
     saveData();
   });
@@ -206,7 +251,7 @@ io.on("connection", (socket) => {
     const oldLower = cleanOld.toLowerCase();
     const newLower = cleanNew.toLowerCase();
 
-    if (cleanNew.length < 2 || cleanNew.length > 20) {
+    if (cleanNew.length < 2 || cleanNew > 20) {
       return socket.emit("change result", { success: false, message: "Name must be 2-20 characters" });
     }
     if (data.registeredNames[newLower]) {
@@ -219,6 +264,10 @@ io.on("connection", (socket) => {
     // Update registered names
     delete data.registeredNames[oldLower];
     data.registeredNames[newLower] = true;
+
+    // Update account
+    data.accounts[cleanNew] = data.accounts[cleanOld];
+    delete data.accounts[cleanOld];
 
     // Update friends lists
     const oldFriends = data.friendData[cleanOld] || [];
@@ -366,7 +415,12 @@ io.on("connection", (socket) => {
   socket.on("disconnect", () => {
     const d = data.onlineSockets[socket.id];
     if (d) {
+      const account = data.accounts[d.username];
       const profile = data.userProfiles[d.username];
+      if (account) {
+        account.isOnline = false;
+        account.lastOnline = new Date().toISOString();
+      }
       if (profile) {
         profile.isOnline = false;
         profile.lastOnline = new Date().toISOString();
@@ -388,8 +442,17 @@ app.get("/api/profile/:id", (req, res) => {
 });
 
 // ----------------------
-// Serve Profile Page
+// Pages
 // ----------------------
+app.get("/", (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+app.get("/home", (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'home.html'));
+});
+app.get("/settings", (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'settings.html'));
+});
 app.get("/users/profile", (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'profile.html'));
 });
