@@ -6,7 +6,7 @@ const cors = require('cors');
 const sanitizeHtml = require('sanitize-html');
 const fs = require('fs');
 const path = require('path');
-const crypto = require('crypto'); // ✅ added for password hashing
+const bcrypt = require('bcrypt');
 
 const app = express();
 const server = http.createServer(app);
@@ -78,9 +78,6 @@ loadData();
 // ----------------------
 // Security Helpers
 // ----------------------
-function hashPassword(password) {
-  return crypto.createHash('sha256').update(password).digest('hex');
-}
 
 // ----------------------
 // Helpers
@@ -150,7 +147,7 @@ io.on("connection", (socket) => {
   console.log("Connected:", socket.id);
 
   // ✅ NEW: Signup
-  socket.on("signup", ({ username, password }, cb) => {
+  socket.on("signup", async ({ username, password }, cb) => {
     const name = clean(username);
     const lowerName = name.toLowerCase();
 
@@ -176,7 +173,7 @@ io.on("connection", (socket) => {
     data.registeredNames[lowerName] = true;
     data.accounts[name] = {
       id,
-      hash: hashPassword(password),
+      hash: await bcrypt.hash(password, 10),
       joinDate: new Date().toISOString(),
       theme: "light",
       lastOnline: null,
@@ -192,7 +189,7 @@ io.on("connection", (socket) => {
   });
 
   // ✅ NEW: Login
-  socket.on("login", ({ username, password }, cb) => {
+  socket.on("login", async ({ username, password }, cb) => {
     const name = clean(username);
     const lowerName = name.toLowerCase();
     const account = data.accounts[name];
@@ -200,9 +197,11 @@ io.on("connection", (socket) => {
     if (!account || !data.registeredNames[lowerName]) {
       return cb({ success: false, message: "Account not found" });
     }
-    if (account.hash !== hashPassword(password)) {
-      return cb({ success: false, message: "Incorrect password" });
-    }
+    const validPassword = await bcrypt.compare(password, account.hash);
+
+if (!validPassword) {
+  return cb({ success: false, message: "Incorrect password" });
+}
 
     cb({ success: true, username: name, id: account.id, theme: account.theme });
   });
@@ -319,7 +318,7 @@ io.on("connection", (socket) => {
   });
 
   // ✅ NEW: Change Password Handler
-  socket.on("change password", ({ username, newPassword }, cb) => {
+  socket.on("change password", async ({ username, newPassword }, cb) => {
     const name = clean(username);
     const account = data.accounts[name];
 
@@ -331,7 +330,7 @@ io.on("connection", (socket) => {
     }
 
     // Update with new hashed password
-    account.hash = hashPassword(newPassword);
+    account.hash = await bcrypt.hash(newPassword, 10);
     saveData();
 
     socket.emit("change result", { success: true, type: "password" });
