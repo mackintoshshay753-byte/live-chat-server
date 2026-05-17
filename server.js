@@ -4,6 +4,8 @@ const http = require('http');
 const { Server } = require('socket.io');
 const cors = require('cors');
 const sanitizeHtml = require('sanitize-html');
+const fs = require('fs');
+const path = require('path');
 
 const app = express();
 const server = http.createServer(app);
@@ -16,22 +18,60 @@ app.use(cors({
   credentials: true
 }));
 app.use(express.json({ limit: '10kb' }));
+// Serve profile page
+app.use(express.static(path.join(__dirname, 'public')));
 
 const io = new Server(server, {
   cors: { origin: ALLOWED_ORIGINS, credentials: true }
 });
 
 // ----------------------
-// Data Storage
+// PERSISTENT STORAGE FILE
 // ----------------------
-const onlineSockets = new Map();     // socketId → { username, isActive }
-const registeredNames = new Set();   // lowercase usernames
-const friendData = new Map();        // username → [friendNames]
-const pendingRequests = new Map();   // username → [requesterNames]
-const userTheme = new Map();         // username → themeName
-const userProfiles = new Map(); // username -> profile
-const usernameToId = new Map(); // username -> id
-let nextUserId = 1;
+const DATA_PATH = path.join(__dirname, 'chat-data.json');
+
+// Default data structure
+let data = {
+  nextUserId: 1,
+  onlineSockets: {},     // socketId → { username, isActive }
+  registeredNames: {},   // lowercase → true
+  friendData: {},        // username → [friendNames]
+  pendingRequests: {},   // username → [requesterNames]
+  userTheme: {},         // username → themeName
+  userProfiles: {},     // username → profile
+  usernameToId: {}      // username → id
+};
+
+// Load data from file if exists
+function loadData() {
+  if (fs.existsSync(DATA_PATH)) {
+    try {
+      const fileData = fs.readFileSync(DATA_PATH, 'utf8');
+      const parsed = JSON.parse(fileData);
+      // Merge with default to ensure all keys exist
+      data = { ...data, ...parsed };
+      console.log("✅ Data loaded from file");
+    } catch (err) {
+      console.error("⚠️ Failed to load data, starting fresh:", err.message);
+      saveData(); // create new file
+    }
+  } else {
+    saveData(); // create initial file
+    console.log("📄 New data file created");
+  }
+}
+
+// Save data to file
+function saveData() {
+  try {
+    fs.writeFileSync(DATA_PATH, JSON.stringify(data, null, 2), 'utf8');
+  } catch (err) {
+    console.error("❌ Failed to save data:", err.message);
+  }
+}
+
+// Load on start
+loadData();
 
 // ----------------------
 // Helpers
@@ -42,9 +82,9 @@ function clean(input) {
 
 function getOnlineUsers() {
   const activeUsers = new Set();
-  for (const data of onlineSockets.values()) {
-    if (data.isActive) activeUsers.add(data.username);
-  }
+  Object.values(data.onlineSockets).forEach(d => {
+    if (d.isActive) activeUsers.add(d.username);
+  });
   return [...activeUsers];
 }
 
@@ -53,10 +93,9 @@ function broadcastOnline() {
 }
 
 function createProfile(username) {
-  if (userProfiles.has(username)) return userProfiles.get(username);
+  if (data.userProfiles[username]) return data.userProfiles[username];
 
-  const id = nextUserId++;
-
+  const id = data.nextUserId++; // ✅ INCREASES BY 1, PERMANENT
   const profile = {
     id,
     username,
@@ -66,31 +105,33 @@ function createProfile(username) {
     isOnline: false
   };
 
-  userProfiles.set(username, profile);
-  usernameToId.set(username, id);
+  data.userProfiles[username] = profile;
+  data.usernameToId[username] = id;
+  saveData(); // Save immediately
 
   return profile;
 }
 
 function getProfileById(id) {
-  for (const profile of userProfiles.values()) {
-    if (profile.id === id) return profile;
+  id = Number(id);
+  for (const prof of Object.values(data.userProfiles)) {
+    if (prof.id === id) return prof;
   }
   return null;
 }
 
 function findSocketIdByUsername(username) {
-  for (const [id, data] of onlineSockets.entries()) {
-    if (data.username === username) return id;
+  for (const [sid, d] of Object.entries(data.onlineSockets)) {
+    if (d.username === username) return sid;
   }
   return null;
 }
 
 function sendPendingRequests(username, socketId) {
-  if (!pendingRequests.has(username)) return;
-  for (const fromUser of pendingRequests.get(username)) {
+  if (!data.pendingRequests[username]) return;
+  data.pendingRequests[username].forEach(fromUser => {
     io.to(socketId).emit("friend request received", { from: fromUser });
-  }
+  });
 }
 
 // ----------------------
@@ -108,61 +149,40 @@ io.on("connection", (socket) => {
     const lowerName = name.toLowerCase();
 
     if (name.length < 2 || name.length > 20) {
-      return socket.emit("join result", {
-        success: false,
-        message: "Username must be 2-20 characters"
-      });
+      return socket.emit("join result", { success: false, message: "Username must be 2-20 characters" });
     }
-
     if (/\s/.test(name)) {
-      return socket.emit("join result", {
-        success: false,
-        message: "No spaces allowed"
-      });
+      return socket.emit("join result", { success: false, message: "No spaces allowed" });
     }
-
     if (!/^[a-zA-Z0-9_]+$/.test(name)) {
-      return socket.emit("join result", {
-        success: false,
-        message: "Only letters, numbers and underscores"
-      });
+      return socket.emit("join result", { success: false, message: "Only letters, numbers and underscores" });
     }
 
     const existingSocketId = findSocketIdByUsername(name);
-    if (registeredNames.has(lowerName) && !existingSocketId) {
+    if (data.registeredNames[lowerName] && !existingSocketId) {
       // Allow rejoin
-    } else if (registeredNames.has(lowerName)) {
-      return socket.emit("join result", {
-        success: false,
-        message: "Username already taken"
-      });
+    } else if (data.registeredNames[lowerName]) {
+      return socket.emit("join result", { success: false, message: "Username already taken" });
     }
 
-    if (!registeredNames.has(lowerName)) {
-      registeredNames.add(lowerName);
+    if (!data.registeredNames[lowerName]) {
+      data.registeredNames[lowerName] = true;
       createProfile(name);
-      friendData.set(name, []);
-      pendingRequests.set(name, []);
-      userTheme.set(name, "light");
+      data.friendData[name] = [];
+      data.pendingRequests[name] = [];
+      data.userTheme[name] = "light";
+      saveData();
     }
 
-    onlineSockets.set(socket.id, {
-      username: name,
-      isActive: true
-    });
+    data.onlineSockets[socket.id] = { username: name, isActive: true };
+    const profile = data.userProfiles[name];
+    if (profile) {
+      profile.isOnline = true;
+      saveData();
+    }
 
-    const profile = userProfiles.get(name);
-if (profile) {
-  profile.isOnline = true;
-}
-
-    if (!friendData.has(name)) friendData.set(name, []);
-    if (!pendingRequests.has(name)) pendingRequests.set(name, []);
-    if (!userTheme.has(name)) userTheme.set(name, "light");
-    if (!userProfiles.has(name)) createProfile(name);
-
-    socket.emit("friends list", friendData.get(name));
-    socket.emit("theme-sync", userTheme.get(name));
+    socket.emit("friends list", data.friendData[name] || []);
+    socket.emit("theme-sync", data.userTheme[name] || "light");
     socket.emit("join result", { success: true });
 
     sendPendingRequests(name, socket.id);
@@ -171,12 +191,13 @@ if (profile) {
   });
 
   socket.on("save-theme", ({ theme }) => {
-    const userData = onlineSockets.get(socket.id);
+    const userData = data.onlineSockets[socket.id];
     if (!userData) return;
-    userTheme.set(userData.username, theme);
-    if (userProfiles.has(userData.username)) {
-      userProfiles.get(userData.username).theme = theme;
+    data.userTheme[userData.username] = theme;
+    if (data.userProfiles[userData.username]) {
+      data.userProfiles[userData.username].theme = theme;
     }
+    saveData();
   });
 
   socket.on("change username", ({ oldName, newName }) => {
@@ -188,81 +209,91 @@ if (profile) {
     if (cleanNew.length < 2 || cleanNew.length > 20) {
       return socket.emit("change result", { success: false, message: "Name must be 2-20 characters" });
     }
-    if (registeredNames.has(newLower)) {
+    if (data.registeredNames[newLower]) {
       return socket.emit("change result", { success: false, message: "Name already taken" });
     }
     if (oldLower === newLower) {
       return socket.emit("change result", { success: false, message: "Same as current name" });
     }
 
-    registeredNames.delete(oldLower);
-    registeredNames.add(newLower);
+    // Update registered names
+    delete data.registeredNames[oldLower];
+    data.registeredNames[newLower] = true;
 
-    const oldFriends = friendData.get(cleanOld) || [];
-    friendData.set(cleanNew, oldFriends);
-    friendData.delete(cleanOld);
+    // Update friends lists
+    const oldFriends = data.friendData[cleanOld] || [];
+    data.friendData[cleanNew] = oldFriends;
+    delete data.friendData[cleanOld];
 
-    for (const [user, friends] of friendData.entries()) {
-      const idx = friends.indexOf(cleanOld);
-      if (idx !== -1) friends[idx] = cleanNew;
-    }
+    Object.keys(data.friendData).forEach(user => {
+      const idx = data.friendData[user].indexOf(cleanOld);
+      if (idx !== -1) data.friendData[user][idx] = cleanNew;
+    });
 
-    const oldPending = pendingRequests.get(cleanOld) || [];
-    pendingRequests.set(cleanNew, oldPending);
-    pendingRequests.delete(cleanOld);
+    // Update requests
+    const oldPending = data.pendingRequests[cleanOld] || [];
+    data.pendingRequests[cleanNew] = oldPending;
+    delete data.pendingRequests[cleanOld];
 
-    for (const [user, requests] of pendingRequests.entries()) {
-      const idx = requests.indexOf(cleanOld);
-      if (idx !== -1) requests[idx] = cleanNew;
-    }
+    Object.keys(data.pendingRequests).forEach(user => {
+      const idx = data.pendingRequests[user].indexOf(cleanOld);
+      if (idx !== -1) data.pendingRequests[user][idx] = cleanNew;
+    });
 
-    const oldTheme = userTheme.get(cleanOld) || "light";
-    userTheme.set(cleanNew, oldTheme);
-    userTheme.delete(cleanOld);
+    // Update theme
+    data.userTheme[cleanNew] = data.userTheme[cleanOld] || "light";
+    delete data.userTheme[cleanOld];
 
-    const oldProfile = userProfiles.get(cleanOld);
+    // Update profile
+    const oldProfile = data.userProfiles[cleanOld];
     if (oldProfile) {
       oldProfile.username = cleanNew;
-      userProfiles.delete(cleanOld);
-      userProfiles.set(cleanNew, oldProfile);
+      data.userProfiles[cleanNew] = oldProfile;
+      data.usernameToId[cleanNew] = oldProfile.id;
+      delete data.userProfiles[cleanOld];
+      delete data.usernameToId[cleanOld];
     }
 
-    for (const data of onlineSockets.values()) {
-      if (data.username === cleanOld) data.username = cleanNew;
-    }
+    // Update online sockets
+    Object.values(data.onlineSockets).forEach(d => {
+      if (d.username === cleanOld) d.username = cleanNew;
+    });
 
+    saveData();
     io.emit("system", `${cleanOld} changed name to ${cleanNew}`);
     io.emit("username updated", { oldName: cleanOld, newName: cleanNew });
 
     broadcastOnline();
     socket.emit("change result", { success: true, newName: cleanNew });
-    socket.emit("friends list", friendData.get(cleanNew));
-    socket.emit("theme-sync", userTheme.get(cleanNew));
+    socket.emit("friends list", data.friendData[cleanNew] || []);
+    socket.emit("theme-sync", data.userTheme[cleanNew] || "light");
   });
 
   socket.on("activity change", ({ active }) => {
-    if (onlineSockets.has(socket.id)) {
-      onlineSockets.get(socket.id).isActive = active;
+    if (data.onlineSockets[socket.id]) {
+      data.onlineSockets[socket.id].isActive = active;
       broadcastOnline();
     }
   });
 
-  socket.on("chat message", (data) => {
-  const userData = onlineSockets.get(socket.id);
-  if (!userData || !data.text) return;
+  // ✅ FIXED: Only send once, no duplicates
+  socket.on("chat message", (dataMsg) => {
+    const userData = data.onlineSockets[socket.id];
+    if (!userData || !dataMsg.text) return;
 
-  const profile = userProfiles.get(userData.username);
+    const profile = data.userProfiles[userData.username];
+    const msgData = {
+      from: userData.username,
+      id: profile ? profile.id : null,
+      text: clean(dataMsg.text),
+      time: new Date().toISOString()
+    };
 
-  io.emit("chat message", {
-    from: userData.username,
-    id: profile ? profile.id : null,
-    text: clean(data.text),
-    time: new Date().toISOString()
+    io.emit("chat message", msgData);
   });
-});
 
   socket.on("typing", () => {
-    const userData = onlineSockets.get(socket.id);
+    const userData = data.onlineSockets[socket.id];
     if (userData && userData.isActive) socket.broadcast.emit("typing", userData.username);
   });
 
@@ -276,34 +307,37 @@ if (profile) {
       io.to(targetId).emit("friend request received", { from });
       return;
     }
-    if (!pendingRequests.has(to)) pendingRequests.set(to, []);
-    if (!pendingRequests.get(to).includes(from)) {
-      pendingRequests.get(to).push(from);
+    if (!data.pendingRequests[to]) data.pendingRequests[to] = [];
+    if (!data.pendingRequests[to].includes(from)) {
+      data.pendingRequests[to].push(from);
+      saveData();
       socket.emit("system", `📨 Request saved — ${to} will see it later`);
     }
   });
 
   socket.on("friend accept", ({ user, from }) => {
-    if (pendingRequests.has(user)) {
-      pendingRequests.set(user, pendingRequests.get(user).filter(f => f !== from));
+    if (data.pendingRequests[user]) {
+      data.pendingRequests[user] = data.pendingRequests[user].filter(f => f !== from);
     }
-    if (!friendData.has(user)) friendData.set(user, []);
-    if (!friendData.has(from)) friendData.set(from, []);
-    if (!friendData.get(user).includes(from)) friendData.get(user).push(from);
-    if (!friendData.get(from).includes(user)) friendData.get(from).push(user);
+    if (!data.friendData[user]) data.friendData[user] = [];
+    if (!data.friendData[from]) data.friendData[from] = [];
+    if (!data.friendData[user].includes(from)) data.friendData[user].push(from);
+    if (!data.friendData[from].includes(user)) data.friendData[from].push(user);
+    saveData();
 
     io.emit("friend added", { friend: from, forUser: user });
     io.emit("friend added", { friend: user, forUser: from });
 
     const userSocket = findSocketIdByUsername(user);
     const fromSocket = findSocketIdByUsername(from);
-    if (userSocket) io.to(userSocket).emit("friends list", friendData.get(user));
-    if (fromSocket) io.to(fromSocket).emit("friends list", friendData.get(from));
+    if (userSocket) io.to(userSocket).emit("friends list", data.friendData[user]);
+    if (fromSocket) io.to(fromSocket).emit("friends list", data.friendData[from]);
   });
 
   socket.on("friend decline", ({ user, from }) => {
-    if (pendingRequests.has(user)) {
-      pendingRequests.set(user, pendingRequests.get(user).filter(f => f !== from));
+    if (data.pendingRequests[user]) {
+      data.pendingRequests[user] = data.pendingRequests[user].filter(f => f !== from);
+      saveData();
     }
     const senderSocket = findSocketIdByUsername(from);
     if (senderSocket) {
@@ -312,49 +346,53 @@ if (profile) {
   });
 
   socket.on("unfriend", ({ user, friend }) => {
-    if (friendData.has(user)) {
-      friendData.set(user, friendData.get(user).filter(f => f !== friend));
+    if (data.friendData[user]) {
+      data.friendData[user] = data.friendData[user].filter(f => f !== friend);
     }
-    if (friendData.has(friend)) {
-      friendData.set(friend, friendData.get(friend).filter(f => f !== user));
+    if (data.friendData[friend]) {
+      data.friendData[friend] = data.friendData[friend].filter(f => f !== user);
     }
+    saveData();
+
     io.emit("friend removed", { friend, forUser: user });
     io.emit("friend removed", { friend: user, forUser: friend });
 
     const userSocket = findSocketIdByUsername(user);
     const friendSocket = findSocketIdByUsername(friend);
-    if (userSocket) io.to(userSocket).emit("friends list", friendData.get(user));
-    if (friendSocket) io.to(friendSocket).emit("friends list", friendData.get(friend));
+    if (userSocket) io.to(userSocket).emit("friends list", data.friendData[user]);
+    if (friendSocket) io.to(friendSocket).emit("friends list", data.friendData[friend]);
   });
 
   socket.on("disconnect", () => {
-  const data = onlineSockets.get(socket.id);
-
-  if (data) {
-    const profile = userProfiles.get(data.username);
-
-    if (profile) {
-      profile.isOnline = false;
-      profile.lastOnline = new Date().toISOString();
+    const d = data.onlineSockets[socket.id];
+    if (d) {
+      const profile = data.userProfiles[d.username];
+      if (profile) {
+        profile.isOnline = false;
+        profile.lastOnline = new Date().toISOString();
+        saveData();
+      }
+      delete data.onlineSockets[socket.id];
+      broadcastOnline();
     }
-
-    onlineSockets.delete(socket.id);
-    broadcastOnline();
-  }
-});
+  });
 });
 
 // ----------------------
 // API — ONLY BY ID
 // ----------------------
 app.get("/api/profile/:id", (req, res) => {
-  const id = Number(req.params.id);
-  const profile = getProfileById(id);
+  const profile = getProfileById(req.params.id);
   if (!profile) return res.status(404).json({ error: "User not found" });
   res.json(profile);
 });
 
-// ❌ REMOVED: /api/user/:username — no more access by name
+// ----------------------
+// Serve Profile Page
+// ----------------------
+app.get("/users/profile", (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'profile.html'));
+});
 
 // ----------------------
 // Start Server
