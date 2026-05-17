@@ -58,7 +58,9 @@ function createProfile(username) {
     id: nextUserId++,
     username,
     joinDate: new Date().toISOString(),
-    theme: "light"
+    theme: "light",
+    lastOnline: null,
+    isOnline: false
   };
 
   userProfiles.set(username, profile);
@@ -143,6 +145,11 @@ io.on("connection", (socket) => {
       username: name,
       isActive: true
     });
+
+    const profile = userProfiles.get(name);
+if (profile) {
+  profile.isOnline = true;
+}
 
     if (!friendData.has(name)) friendData.set(name, []);
     if (!pendingRequests.has(name)) pendingRequests.set(name, []);
@@ -312,11 +319,20 @@ io.on("connection", (socket) => {
   });
 
   socket.on("disconnect", () => {
-    if (onlineSockets.has(socket.id)) {
-      onlineSockets.delete(socket.id);
-      broadcastOnline();
+  const data = onlineSockets.get(socket.id);
+
+  if (data) {
+    const profile = userProfiles.get(data.username);
+
+    if (profile) {
+      profile.isOnline = false;
+      profile.lastOnline = new Date().toISOString();
     }
-  });
+
+    onlineSockets.delete(socket.id);
+    broadcastOnline();
+  }
+});
 });
 
 // ----------------------
