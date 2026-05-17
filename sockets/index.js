@@ -2,24 +2,9 @@ const bcrypt = require('bcrypt');
 const { data, saveData } = require('../data');
 const { clean, createProfile } = require('../helpers');
 
-const onlineUsers = new Set();
-
 function setupSockets(io) {
   io.on("connection", (socket) => {
     console.log("🔌 User connected");
-
-    socket.on("verify-online", ({ username }) => {
-      if (username) {
-        socket.username = clean(username);
-        onlineUsers.add(socket.username);
-      }
-    });
-
-    socket.on("disconnect", () => {
-      if (socket.username) {
-        onlineUsers.delete(socket.username);
-      }
-    });
 
     socket.on("login", async ({ username, password }, cb) => {
       try {
@@ -118,18 +103,12 @@ function setupSockets(io) {
           delete data.userProfiles[cleanOld];
           oldProfile.username = cleanNew;
           data.userProfiles[cleanNew] = oldProfile;
-
+          
           if (data.usernameToId[cleanOld]) {
             const id = data.usernameToId[cleanOld];
             delete data.usernameToId[cleanOld];
             data.usernameToId[cleanNew] = id;
           }
-        }
-
-        // Update onlineUsers set if the user was online
-        if (onlineUsers.has(cleanOld)) {
-          onlineUsers.delete(cleanOld);
-          onlineUsers.add(cleanNew);
         }
 
         saveData();
@@ -160,6 +139,7 @@ function setupSockets(io) {
         saveData();
 
         safeCb(cb, { success: true, message: "Password updated successfully" });
+
       } catch (err) {
         console.error("CHANGE PASSWORD ERROR:", err);
         safeCb(cb, { success: false, message: "Something went wrong" });
@@ -173,4 +153,4 @@ function safeCb(cb, data) {
   if (typeof cb === "function") cb(data);
 }
 
-module.exports = { setupSockets, onlineUsers };
+module.exports = setupSockets;

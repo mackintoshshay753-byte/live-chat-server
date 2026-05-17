@@ -26,7 +26,7 @@ const { loadData } = require('./data');
 loadData();
 
 // Setup sockets
-const { setupSockets } = require('./sockets');
+const setupSockets = require('./sockets');
 setupSockets(io);
 
 // Load routes

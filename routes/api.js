@@ -2,7 +2,6 @@ const express = require('express');
 const router = express.Router();
 const { getProfileById, clean } = require('../helpers');
 const { data } = require('../data');
-const { onlineUsers } = require('../sockets');
 
 router.get("/profile/:id", (req, res) => {
   const profile = getProfileById(req.params.id);
@@ -24,22 +23,18 @@ router.get("/search/users", (req, res) => {
     if (username.toLowerCase().includes(keyword)) {
       matches.push({
         id: info.id,
-        username: username,
-        online: onlineUsers.has(username)
+        username: username
       });
     }
   });
 
-  // Online users sorted to the top, then alphabetically
-  matches.sort((a, b) => {
-    if (b.online !== a.online) return b.online - a.online;
-    return a.username.localeCompare(b.username);
-  });
+  matches.sort((a, b) => a.username.localeCompare(b.username));
 
   const total = matches.length;
   const pages = Math.ceil(total / limit);
   const start = (page - 1) * limit;
-  const results = matches.slice(start, start + limit);
+  const end = start + limit;
+  const results = matches.slice(start, end);
 
   res.json({ results, total, page, pages });
 });
