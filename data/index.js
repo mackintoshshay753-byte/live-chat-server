@@ -9,7 +9,9 @@ const DEFAULT_DATA = {
   registeredNames: {},
   accounts: {},
   userProfiles: {},
-  usernameToId: {}
+  usernameToId: {},
+  friendRequests: {}, // ✅ NEW — stores pending requests
+  friends: {}        // ✅ NEW — stores confirmed friends
 };
 
 let data = { ...DEFAULT_DATA };
