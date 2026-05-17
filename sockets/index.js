@@ -1,12 +1,13 @@
 const bcrypt = require('bcrypt');
 const { data, saveData } = require('../data');
 const { clean, createProfile } = require('../helpers');
+const routes = require('../routes/api');
+const onlineUsers = routes.onlineUsers;
 
 function setupSockets(io) {
   io.on("connection", (socket) => {
     console.log("🔌 User connected");
 
-    // LOGIN
     socket.on("login", async ({ username, password }, cb) => {
       try {
         const name = clean(username);
@@ -20,6 +21,9 @@ function setupSockets(io) {
         if (!validPassword)
           return safeCb(cb, { success: false, message: "Incorrect password" });
 
+        onlineUsers.add(name);
+        socket.username = name;
+
         safeCb(cb, { success: true, username: name, id: account.id, theme: account.theme });
       } catch (err) {
         console.error("Login Error:", err);
@@ -27,7 +31,13 @@ function setupSockets(io) {
       }
     });
 
-    // SIGNUP
+    socket.on("disconnect", () => {
+      if (socket.username) {
+        onlineUsers.delete(socket.username);
+        console.log("🔌 User disconnected:", socket.username);
+      }
+    });
+
     socket.on("signup", async ({ username, password }, cb) => {
       try {
         const name = clean(username);
@@ -62,7 +72,6 @@ function setupSockets(io) {
       }
     });
 
-    // SAVE THEME
     socket.on("save-theme", ({ theme, username }) => {
       try {
         const account = data.accounts[username];
@@ -75,7 +84,6 @@ function setupSockets(io) {
       }
     });
 
-    // CHANGE USERNAME
     socket.on("change username", ({ oldName, newName }, cb) => {
       try {
         const cleanOld = clean(oldName);
@@ -115,6 +123,11 @@ function setupSockets(io) {
           }
         }
 
+        if (onlineUsers.has(cleanOld)) {
+          onlineUsers.delete(cleanOld);
+          onlineUsers.add(cleanNew);
+        }
+
         saveData();
         io.emit("username updated", { oldName: cleanOld, newName: cleanNew });
 
@@ -125,7 +138,6 @@ function setupSockets(io) {
       }
     });
 
-    // CHANGE PASSWORD
     socket.on("change password", async ({ username, newPassword }, cb) => {
       try {
         const name = clean(username);
