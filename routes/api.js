@@ -3,22 +3,19 @@ const router = express.Router();
 const { getProfileById, clean } = require('../helpers');
 const { data } = require('../data');
 
-// Shared online users set
 let onlineUsers = new Set();
 module.exports.onlineUsers = onlineUsers;
 
-// Profile route — unchanged
 router.get("/profile/:id", (req, res) => {
   const profile = getProfileById(req.params.id);
   if (!profile) return res.status(404).json({ error: "User not found" });
   res.json(profile);
 });
 
-// Search route — NOW with pagination, 12 per page
 router.get("/search/users", (req, res) => {
   let keyword = clean(req.query.keyword || "");
   const page = parseInt(req.query.page) || 1;
-  const limit = 12; // ✅ 12 results per page
+  const limit = 12;
 
   if (!keyword || keyword.length < 3) return res.json({ results: [], total: 0, page, pages: 0 });
 
@@ -37,7 +34,6 @@ router.get("/search/users", (req, res) => {
 
   matches.sort((a, b) => a.username.localeCompare(b.username));
 
-  // Pagination logic
   const total = matches.length;
   const pages = Math.ceil(total / limit);
   const start = (page - 1) * limit;
