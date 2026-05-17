@@ -6,6 +6,7 @@ const cors = require('cors');
 const sanitizeHtml = require('sanitize-html');
 const fs = require('fs');
 const path = require('path');
+const { MongoClient } = require('mongodb');
 const bcrypt = require('bcrypt');
 
 const app = express();
@@ -29,7 +30,6 @@ const io = new Server(server, {
 // ----------------------
 // PERSISTENT STORAGE FILE
 // ----------------------
-const DATA_PATH = path.join(__dirname, 'chat-data.json');
 
 // Default data structure
 let data = {
@@ -44,36 +44,46 @@ let data = {
   usernameToId: {}       // username → id
 };
 
-// Load data from file if exists
-function loadData() {
-  if (fs.existsSync(DATA_PATH)) {
-    try {
-      const fileData = fs.readFileSync(DATA_PATH, 'utf8');
-      const parsed = JSON.parse(fileData);
-      // Merge with default to ensure all keys exist
-      data = { ...data, ...parsed };
-      console.log("✅ Data loaded from file");
-    } catch (err) {
-      console.error("⚠️ Failed to load data, starting fresh:", err.message);
-      saveData(); // create new file
-    }
-  } else {
-    saveData(); // create initial file
-    console.log("📄 New data file created");
-  }
-}
+const client = new MongoClient(process.env.MONGO_URI);
 
-// Save data to file
-function saveData() {
+async function connectDB() {
   try {
-    fs.writeFileSync(DATA_PATH, JSON.stringify(data, null, 2), 'utf8');
+    await client.connect();
+
+    const db = client.db("livechat");
+    const collection = db.collection("appdata");
+
+    const existing = await collection.findOne({ name: "mainData" });
+
+    if (existing && existing.data) {
+      data = existing.data;
+      console.log("✅ MongoDB data loaded");
+    } else {
+      await collection.insertOne({
+        name: "mainData",
+        data
+      });
+      console.log("📄 MongoDB database created");
+    }
+
+    global.dbCollection = collection;
+
   } catch (err) {
-    console.error("❌ Failed to save data:", err.message);
+    console.error("❌ MongoDB connection failed:", err);
   }
 }
 
-// Load on start
-loadData();
+async function saveData() {
+  if (!global.dbCollection) return;
+
+  await global.dbCollection.updateOne(
+    { name: "mainData" },
+    { $set: { data } },
+    { upsert: true }
+  );
+}
+
+connectDB();
 
 // ----------------------
 // Security Helpers
