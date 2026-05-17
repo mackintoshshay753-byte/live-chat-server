@@ -33,7 +33,11 @@ function setupSockets(io) {
 
     socket.on("disconnect", () => {
       if (socket.username) {
-        onlineUsers.delete(socket.username);
+        let stillConnected = false;
+        io.sockets.sockets.forEach(s => {
+          if (s !== socket && s.username === socket.username) stillConnected = true;
+        });
+        if (!stillConnected) onlineUsers.delete(socket.username);
         console.log("🔌 User disconnected:", socket.username);
       }
     });
