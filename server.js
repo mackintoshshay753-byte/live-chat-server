@@ -243,14 +243,18 @@ if (profile) {
   });
 
   socket.on("chat message", (data) => {
-    const userData = onlineSockets.get(socket.id);
-    if (!userData || !data.text) return;
-    io.emit("chat message", {
-      from: userData.username,
-      text: clean(data.text),
-      time: new Date().toISOString()
-    });
+  const userData = onlineSockets.get(socket.id);
+  if (!userData || !data.text) return;
+
+  const profile = userProfiles.get(userData.username);
+
+  io.emit("chat message", {
+    from: userData.username,
+    id: profile ? profile.id : null,
+    text: clean(data.text),
+    time: new Date().toISOString()
   });
+});
 
   socket.on("typing", () => {
     const userData = onlineSockets.get(socket.id);
