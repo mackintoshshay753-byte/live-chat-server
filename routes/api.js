@@ -3,17 +3,22 @@ const router = express.Router();
 const { getProfileById, clean } = require('../helpers');
 const { data } = require('../data');
 
-// Your original profile route — 100% untouched
+// --------------------------
+// YOUR ORIGINAL PROFILE ROUTE — 100% UNCHANGED
+// --------------------------
 router.get("/profile/:id", (req, res) => {
   const profile = getProfileById(req.params.id);
   if (!profile) return res.status(404).json({ error: "User not found" });
   res.json(profile);
 });
 
-// ✅ FIXED SEARCH ROUTE — detects online status correctly with YOUR data structure
+// --------------------------
+// ✅ FINAL FIX: SEARCH ROUTE — READS REAL ONLINE STATUS FROM SOCKET TRACKING
+// --------------------------
 router.get("/search/users", (req, res) => {
   let keyword = clean(req.query.keyword || "");
 
+  // Same rule: require at least 3 characters
   if (!keyword || keyword.length < 3) {
     return res.json([]);
   }
@@ -24,8 +29,8 @@ router.get("/search/users", (req, res) => {
   // Search through accounts
   Object.entries(data.accounts).forEach(([username, info]) => {
     if (username.toLowerCase().includes(keyword)) {
-      // ✅ CORRECT CHECK: if user has an active session → online
-      const isOnline = !!(data.sessions && data.sessions[info.id]);
+      // ✅ CORRECT CHECK: online status is stored in data.onlineUsers from your sockets.js
+      const isOnline = !!(data.onlineUsers && data.onlineUsers.includes(Number(info.id)));
 
       matches.push({
         id: info.id,
