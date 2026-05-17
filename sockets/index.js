@@ -100,17 +100,17 @@ socket.on("change password", async ({ username, newPassword }, cb) => {
   const account = data.accounts[name];
   if (!account) return cb({ success: false, message: "Account not found" });
 
-  // ✅ ADD THIS CHECK — same password error
+  // ✅ SAME PASSWORD CHECK — sends correct message
   const sameAsOld = await bcrypt.compare(newPassword, account.hash);
   if (sameAsOld) {
-    return cb({ success: false, message: "Password cannot be the same as it is already" });
+    return cb({ success: false, message: "Password cannot be the same as it already is" });
   }
 
   if (newPassword.length < 8) return cb({ success: false, message: "Password must be at least 8 characters" });
 
   account.hash = await bcrypt.hash(newPassword, 10);
   saveData();
-  cb({ success: true, type: "password" }); // ✅ Send type so client knows it's password update
+  cb({ success: true }); // ✅ Success flag only
 });
 
   });
