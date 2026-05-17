@@ -110,7 +110,7 @@ function createProfile(username) {
     username,
     joinDate: new Date().toISOString(),
     theme: "light",
-    lastOnlineline: null,
+    lastOnline: null,
     isOnline: false
   };
 
