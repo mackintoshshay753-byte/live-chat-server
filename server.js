@@ -32,9 +32,29 @@ const pendingRequests = new Map(); // username → [list of pending requests]
 
 // ✅ ✅ ✅ CRITICAL FIX: STORE THEME SEPARATELY FROM SOCKET CONNECTION — PERMANENT
 const userTheme = new Map(); // username → theme ("light"/"dark") — **ALWAYS REMEMBERED**
+const userProfiles = new Map();
+let nextUserId = 1;
 
 function clean(input) {
   return sanitizeHtml(input.trim(), { allowedTags: [], allowedAttributes: {} });
+}
+
+function createProfile(username){
+
+  if(userProfiles.has(username)){
+    return userProfiles.get(username);
+  }
+
+  const profile = {
+    id: nextUserId++,
+    username: username,
+    joinDate: new Date().toISOString(),
+    theme: "light"
+  };
+
+  userProfiles.set(username, profile);
+
+  return profile;
 }
 
 // Get users with at least 1 active tab open
@@ -101,6 +121,7 @@ io.on("connection", (socket) => {
   }
   // ✅ CREATE NEW ACCOUNT
   registeredNames.add(lowerName);
+  createProfile(name);
   onlineSockets.set(socket.id, {
     username: name,
     isActive: true
@@ -123,6 +144,9 @@ io.on("connection", (socket) => {
     if (userData) {
       // ✅ Save directly by USERNAME — survives disconnects/restarts
       userTheme.set(userData.username, theme); 
+      if(userProfiles.has(userData.username)){
+  userProfiles.get(userData.username).theme = theme;
+}
     }
   });
 
@@ -271,6 +295,133 @@ io.on("connection", (socket) => {
       broadcastOnline();
     }
   });
+});
+
+// ===========================
+// GET USER BY USERNAME
+// ===========================
+
+app.get("/api/user/:username", (req, res) => {
+
+  const username = req.params.username;
+
+  const profile = userProfiles.get(username);
+
+  if(!profile){
+
+    return res.status(404).json({
+      error: "User not found"
+    });
+
+  }
+
+  res.json(profile);
+
+});
+
+// ===========================
+// PROFILE PAGE
+// ===========================
+
+app.get("/users/:id/profile", (req, res) => {
+
+  const id = Number(req.params.id);
+
+  let foundProfile = null;
+
+  for(const profile of userProfiles.values()){
+
+    if(profile.id === id){
+      foundProfile = profile;
+      break;
+    }
+
+  }
+
+  if(!foundProfile){
+
+    return res.send(`
+      <h1>User not found</h1>
+    `);
+
+  }
+
+  res.send(`
+
+<!doctype html>
+<html>
+<head>
+
+<title>${foundProfile.username}</title>
+
+<style>
+
+body{
+  background:#111;
+  color:white;
+  font-family:Arial;
+  padding:40px;
+}
+
+.card{
+  background:#1e1e1e;
+  padding:20px;
+  border-radius:12px;
+  max-width:500px;
+  margin:auto;
+}
+
+.label{
+  color:#888;
+  font-size:14px;
+}
+
+.value{
+  margin-bottom:20px;
+  font-size:20px;
+}
+
+a{
+  color:#00a2ff;
+  text-decoration:none;
+}
+
+</style>
+
+</head>
+
+<body>
+
+<div class="card">
+
+<h1>${foundProfile.username}</h1>
+
+<div class="label">User ID</div>
+<div class="value">
+${foundProfile.id}
+</div>
+
+<div class="label">Join Date</div>
+<div class="value">
+${new Date(foundProfile.joinDate).toLocaleString()}
+</div>
+
+<div class="label">Theme</div>
+<div class="value">
+${foundProfile.theme}
+</div>
+
+<a href="https://idontknowww.neocities.org">
+← Back to Chat
+</a>
+
+</div>
+
+</body>
+</html>
+
+  `);
+
 });
 
 // --------------------------
