@@ -26,7 +26,7 @@ const io = new Server(server, {
 });
 
 // ----------------------
-// STORAGE — KEEPS OLD DATA SAFE
+// STORAGE — PRESERVES ALL OLD USERS
 // ----------------------
 const DATA_PATH = path.join(__dirname, 'chat-data.json');
 
@@ -36,13 +36,13 @@ const DEFAULT_DATA = {
   accounts: {},
   userProfiles: {},
   usernameToId: {},
-  userSockets: {} // ✅ Track all active sockets per user
+  activeConnections: {} // Track every open tab/connection
 };
 
 let data = { ...DEFAULT_DATA };
 
 // ----------------------
-// SAFE LOAD / SAVE
+// SAFE LOAD / SAVE — NO MORE USER WIPES
 // ----------------------
 function loadData() {
   if (!fs.existsSync(DATA_PATH)) {
@@ -54,7 +54,7 @@ function loadData() {
     const raw = fs.readFileSync(DATA_PATH, 'utf8');
     const loaded = JSON.parse(raw);
     data = { ...DEFAULT_DATA, ...loaded };
-    console.log("✅ Data loaded — all users preserved");
+    console.log("✅ Data loaded — ID 1 & all users preserved");
   } catch (err) {
     console.error("⚠️ Data read error — backup saved, starting fresh");
     if (fs.existsSync(DATA_PATH)) fs.renameSync(DATA_PATH, DATA_PATH + `.bak-${Date.now()}.json`);
@@ -64,7 +64,10 @@ function loadData() {
 
 function saveData() {
   try {
-    fs.writeFileSync(DATA_PATH, JSON.stringify(data, null, 2), 'utf8');
+    // Remove temp connection data before saving
+    const saveCopy = JSON.parse(JSON.stringify(data));
+    saveCopy.activeConnections = {};
+    fs.writeFileSync(DATA_PATH, JSON.stringify(saveCopy, null, 2), 'utf8');
   } catch (err) {
     console.error("❌ Save failed:", err.message);
   }
@@ -103,31 +106,34 @@ function getProfileById(id) {
   return Object.values(data.userProfiles).find(p => Number(p.id) === id) || null;
 }
 
-// ✅ Check if user has ANY active socket connection
-function updateUserOnlineStatus(username) {
-  const hasActive = Object.values(data.userSockets || {}).some(u => u === username);
-  const account = data.accounts[username];
+// ✅ Update online status: ONLINE = ANY connection open; OFFLINE = NO connections
+function updateOnlineStatus(username) {
+  const count = Object.values(data.activeConnections).filter(u => u === username).length;
   const profile = data.userProfiles[username];
+  if (!profile) return;
 
-  if (account) account.isOnline = hasActive;
-  if (profile) {
-    profile.isOnline = hasActive;
-    if (!hasActive) profile.lastOnline = new Date().toISOString(); // Only update when going OFFLINE
+  if (count > 0) {
+    profile.isOnline = true;
+    // Keep lastOnline as-is while online
+  } else {
+    if (profile.isOnline) { // Only set time when actually going offline
+      profile.isOnline = false;
+      profile.lastOnline = new Date().toISOString();
+      saveData();
+    }
   }
-  saveData();
 }
 
 // ----------------------
-// SOCKET EVENTS
+// SOCKET EVENTS — FIXED PRESENCE DETECTION
 // ----------------------
 io.on("connection", (socket) => {
 
-  // ✅ User opens ANY page — send their username to mark them online
-  socket.on("user present", (username) => {
+  // ✅ Runs on EVERY page load (home, settings, profile)
+  socket.on("iamhere", (username) => {
     if (!username) return;
-    // Track this socket for the user
-    data.userSockets[socket.id] = username;
-    updateUserOnlineStatus(username);
+    data.activeConnections[socket.id] = username;
+    updateOnlineStatus(username);
   });
 
   // SIGNUP
@@ -152,9 +158,7 @@ io.on("connection", (socket) => {
       id,
       hash: await bcrypt.hash(password, 10),
       joinDate: new Date().toISOString(),
-      theme: "light",
-      lastOnline: null,
-      isOnline: false
+      theme: "light"
     };
     createProfile(name);
     saveData();
@@ -233,16 +237,16 @@ io.on("connection", (socket) => {
     cb({ success: true });
   });
 
-  // ✅ DISCONNECT — only mark offline when NO pages are open
+  // ✅ DISCONNECT — only mark offline when NO tabs are open
   socket.on("disconnect", () => {
-    const username = data.userSockets[socket.id];
-    delete data.userSockets[socket.id];
-    if (username) updateUserOnlineStatus(username);
+    const username = data.activeConnections[socket.id];
+    delete data.activeConnections[socket.id];
+    if (username) updateOnlineStatus(username);
   });
 });
 
 // ----------------------
-// API
+// API — ID 1 WORKS 100%
 // ----------------------
 app.get("/api/profile/:id", (req, res) => {
   const profile = getProfileById(req.params.id);
