@@ -1,20 +1,19 @@
 const express = require('express');
 const router = express.Router();
 const { getProfileById, clean } = require('../helpers');
-const { data } = require('../data'); // ← we need this to search users
+const { data } = require('../data');
 
-// Your existing profile route — left exactly as is
+// Your original profile route — 100% untouched
 router.get("/profile/:id", (req, res) => {
   const profile = getProfileById(req.params.id);
   if (!profile) return res.status(404).json({ error: "User not found" });
   res.json(profile);
 });
 
-// ✅ UPDATED SEARCH ROUTE — keeps all your logic, just adds online status
+// ✅ FIXED SEARCH ROUTE — detects online status correctly with YOUR data structure
 router.get("/search/users", (req, res) => {
   let keyword = clean(req.query.keyword || "");
-  
-  // Same rules as everywhere else: require at least 3 characters
+
   if (!keyword || keyword.length < 3) {
     return res.json([]);
   }
@@ -22,19 +21,21 @@ router.get("/search/users", (req, res) => {
   keyword = keyword.toLowerCase();
   const matches = [];
 
-  // Search through all registered accounts
+  // Search through accounts
   Object.entries(data.accounts).forEach(([username, info]) => {
     if (username.toLowerCase().includes(keyword)) {
+      // ✅ CORRECT CHECK: if user has an active session → online
+      const isOnline = !!(data.sessions && data.sessions[info.id]);
+
       matches.push({
         id: info.id,
         username: username,
-        // ✅ Added this one line — checks if user ID is in your data.online array
-        online: Array.isArray(data.online) && data.online.includes(info.id)
+        online: isOnline
       });
     }
   });
 
-  // Sort results A–Z — exactly as you had
+  // Sort A–Z
   matches.sort((a, b) => a.username.localeCompare(b.username));
 
   res.json(matches);
