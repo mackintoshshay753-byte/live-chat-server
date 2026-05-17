@@ -6,7 +6,6 @@ function setupSockets(io) {
   io.on("connection", (socket) => {
     console.log("🔌 User connected");
 
-    // LOGIN
     socket.on("login", async ({ username, password }, cb) => {
       try {
         const name = clean(username);
@@ -27,7 +26,6 @@ function setupSockets(io) {
       }
     });
 
-    // SIGNUP
     socket.on("signup", async ({ username, password }, cb) => {
       try {
         const name = clean(username);
@@ -62,7 +60,6 @@ function setupSockets(io) {
       }
     });
 
-    // SAVE THEME
     socket.on("save-theme", ({ theme, username }) => {
       try {
         const account = data.accounts[username];
@@ -75,7 +72,6 @@ function setupSockets(io) {
       }
     });
 
-    // CHANGE USERNAME
     socket.on("change username", ({ oldName, newName }, cb) => {
       try {
         const cleanOld = clean(oldName);
@@ -125,7 +121,6 @@ function setupSockets(io) {
       }
     });
 
-    // CHANGE PASSWORD
     socket.on("change password", async ({ username, newPassword }, cb) => {
       try {
         const name = clean(username);
