@@ -1,0 +1,112 @@
+const bcrypt = require('bcrypt');
+const { data, saveData } = require('../data');
+const { clean, createProfile } = require('../helpers');
+
+function setupSockets(io) {
+  io.on("connection", (socket) => {
+
+    // SIGNUP
+    socket.on("signup", async ({ username, password }, cb) => {
+      const name = clean(username);
+      const lowerName = name.toLowerCase();
+
+      if (name.length < 2 || name.length > 20)
+        return cb({ success: false, message: "Username must be 2-20 characters" });
+      if (/\s/.test(name))
+        return cb({ success: false, message: "No spaces allowed" });
+      if (!/^[a-zA-Z0-9_]+$/.test(name))
+        return cb({ success: false, message: "Only letters, numbers and underscores" });
+      if (password.length < 8)
+        return cb({ success: false, message: "Password must be at least 8 characters" });
+      if (data.registeredNames[lowerName])
+        return cb({ success: false, message: "Username already taken" });
+
+      const id = data.nextUserId;
+      data.registeredNames[lowerName] = true;
+      data.accounts[name] = {
+        id,
+        hash: await bcrypt.hash(password, 10),
+        joinDate: new Date().toISOString(),
+        theme: "light"
+      };
+      createProfile(name);
+      saveData();
+
+      cb({ success: true, username: name, id });
+    });
+
+    // LOGIN
+    socket.on("login", async ({ username, password }, cb) => {
+      const name = clean(username);
+      const lowerName = name.toLowerCase();
+      const account = data.accounts[name];
+
+      if (!account || !data.registeredNames[lowerName])
+        return cb({ success: false, message: "Account not found" });
+
+      const validPassword = await bcrypt.compare(password, account.hash);
+      if (!validPassword)
+        return cb({ success: false, message: "Incorrect password" });
+
+      cb({ success: true, username: name, id: account.id, theme: account.theme });
+    });
+
+    // SAVE THEME
+    socket.on("save-theme", ({ theme, username }) => {
+      const account = data.accounts[username];
+      if (!account) return;
+      account.theme = theme;
+      if (data.userProfiles[username]) data.userProfiles[username].theme = theme;
+      saveData();
+    });
+
+    // CHANGE USERNAME
+    socket.on("change username", ({ oldName, newName }, cb) => {
+      const cleanOld = clean(oldName);
+      const cleanNew = clean(newName);
+      const oldLower = cleanOld.toLowerCase();
+      const newLower = cleanNew.toLowerCase();
+
+      if (cleanNew.length < 2 || cleanNew > 20)
+        return cb({ success: false, message: "Name must be 2-20 characters" });
+      if (data.registeredNames[newLower])
+        return cb({ success: false, message: "Name already taken" });
+      if (oldLower === newLower)
+        return cb({ success: false, message: "Same as current name" });
+
+      delete data.registeredNames[oldLower];
+      data.registeredNames[newLower] = true;
+
+      data.accounts[cleanNew] = data.accounts[cleanOld];
+      delete data.accounts[cleanOld];
+
+      const oldProfile = data.userProfiles[cleanOld];
+      if (oldProfile) {
+        oldProfile.username = cleanNew;
+        data.userProfiles[cleanNew] = oldProfile;
+        data.usernameToId[cleanNew] = oldProfile.id;
+        delete data.userProfiles[cleanOld];
+        delete data.usernameToId[cleanOld];
+      }
+
+      saveData();
+      cb({ success: true, newName: cleanNew });
+      io.emit("username updated", { oldName: cleanOld, newName: cleanNew });
+    });
+
+    // CHANGE PASSWORD
+    socket.on("change password", async ({ username, newPassword }, cb) => {
+      const name = clean(username);
+      const account = data.accounts[name];
+      if (!account) return cb({ success: false, message: "Account not found" });
+      if (newPassword.length < 8) return cb({ success: false, message: "Password must be at least 8 characters" });
+
+      account.hash = await bcrypt.hash(newPassword, 10);
+      saveData();
+      cb({ success: true });
+    });
+
+  });
+}
+
+module.exports = setupSockets;
