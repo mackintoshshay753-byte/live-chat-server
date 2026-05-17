@@ -29,7 +29,8 @@ const registeredNames = new Set();   // lowercase usernames
 const friendData = new Map();        // username → [friendNames]
 const pendingRequests = new Map();   // username → [requesterNames]
 const userTheme = new Map();         // username → themeName
-const userProfiles = new Map();      // username → profileObject
+const userProfiles = new Map(); // username -> profile
+const usernameToId = new Map(); // username -> id
 let nextUserId = 1;
 
 // ----------------------
@@ -54,8 +55,10 @@ function broadcastOnline() {
 function createProfile(username) {
   if (userProfiles.has(username)) return userProfiles.get(username);
 
+  const id = nextUserId++;
+
   const profile = {
-    id: nextUserId++,
+    id,
     username,
     joinDate: new Date().toISOString(),
     theme: "light",
@@ -64,6 +67,8 @@ function createProfile(username) {
   };
 
   userProfiles.set(username, profile);
+  usernameToId.set(username, id);
+
   return profile;
 }
 
