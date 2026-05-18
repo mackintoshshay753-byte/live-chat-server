@@ -2,27 +2,31 @@ const bcrypt = require('bcrypt');
 const { data, saveData } = require('../data');
 const { clean, createProfile } = require('../helpers');
 
+// ✅ Critical: Make this GLOBAL so API can access the LIVE version
 const onlineUsers = new Map(); // username -> socket.id
+global.onlineUsers = onlineUsers;
 
 function setupSockets(io) {
   io.on("connection", (socket) => {
     console.log("🔌 User connected");
 
-    // ==================== LAST ONLINE ====================
+    // ==================== LAST ONLINE + ONLINE STATUS ====================
     socket.on("join", (username) => {
       const cleanName = clean(username);
       if (!cleanName) return;
 
+      // Mark user as online
       onlineUsers.set(cleanName, socket.id);
 
       if (data.userProfiles[cleanName]) {
         data.userProfiles[cleanName].lastOnline = new Date().toISOString();
         saveData();
       }
-      console.log(`👤 ${cleanName} is online`);
+      console.log(`👤 ${cleanName} is online | Total online: ${onlineUsers.size}`);
     });
 
     socket.on("disconnect", () => {
+      // Mark user as offline
       for (const [username, id] of onlineUsers.entries()) {
         if (id === socket.id) {
           if (data.userProfiles[username]) {
@@ -30,7 +34,7 @@ function setupSockets(io) {
             saveData();
           }
           onlineUsers.delete(username);
-          console.log(`👤 ${username} went offline`);
+          console.log(`👤 ${username} went offline | Total online: ${onlineUsers.size}`);
           break;
         }
       }
@@ -185,6 +189,3 @@ function safeCb(cb, data) {
 // ==================== EXPORTS ====================
 module.exports = setupSockets;
 module.exports.onlineUsers = onlineUsers;
-
-// Global fallback (this usually fixes Render issues)
-global.onlineUsers = onlineUsers;

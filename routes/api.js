@@ -4,7 +4,7 @@ const router = express.Router();
 const { getProfileById, clean } = require('../helpers');
 const { data } = require('../data');
 
-// Use global onlineUsers as main source
+// ✅ Use the GLOBAL LIVE onlineUsers map
 const onlineUsers = global.onlineUsers || new Map();
 
 // ==================== PROFILE ====================
@@ -33,20 +33,20 @@ router.get("/search/users", (req, res) => {
     keyword = keyword.toLowerCase();
     const matches = [];
 
-    console.log(`[Search] Query: "${keyword}" | Online users: ${onlineUsers.size}`);
+    console.log(`[Search] Query: "${keyword}" | Online users total: ${onlineUsers.size}`);
 
     Object.entries(data.accounts).forEach(([username, info]) => {
       if (username.toLowerCase().includes(keyword)) {
         const profile = data.userProfiles[username] || {};
-        // Check if user is currently online
+        // ✅ Check LIVE online status
         const isOnline = onlineUsers.has(username);
 
-        console.log(`[Search] ${username} → Online: ${isOnline}`);
+        console.log(`[Search Check] ${username} → Online: ${isOnline}`);
 
         matches.push({
           id: info.id,
           username: username,
-          isOnline: isOnline, // ✅ Send online status to frontend
+          isOnline: isOnline, // ✅ This is what your frontend uses
           lastOnline: profile.lastOnline || null
         });
       }
