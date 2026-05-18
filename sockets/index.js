@@ -82,7 +82,7 @@ function setupSockets(io) {
           theme: "light"
         };
 
-        createProfile(name);
+        createProfile(name);   // Now safe (doesn't increment again)
         saveData();
 
         safeCb(cb, { success: true, username: name, id });
@@ -92,7 +92,7 @@ function setupSockets(io) {
       }
     });
 
-    // ==================== OTHER HANDLERS ====================
+    // ==================== OTHER ====================
     socket.on("save-theme", ({ theme, username }) => {
       try {
         const account = data.accounts[username];
@@ -106,7 +106,6 @@ function setupSockets(io) {
     });
 
     socket.on("change username", ({ oldName, newName }, cb) => {
-      // ... (your original code - unchanged)
       try {
         const cleanOld = clean(oldName);
         const cleanNew = clean(newName);
@@ -138,6 +137,11 @@ function setupSockets(io) {
           data.userProfiles[cleanNew] = oldProfile;
         }
 
+        if (data.usernameToId[cleanOld]) {
+          data.usernameToId[cleanNew] = data.usernameToId[cleanOld];
+          delete data.usernameToId[cleanOld];
+        }
+
         saveData();
         io.emit("username updated", { oldName: cleanOld, newName: cleanNew });
 
@@ -166,13 +170,11 @@ function setupSockets(io) {
         saveData();
 
         safeCb(cb, { success: true, message: "Password updated successfully" });
-
       } catch (err) {
         console.error("CHANGE PASSWORD ERROR:", err);
         safeCb(cb, { success: false, message: "Something went wrong" });
       }
     });
-
   });
 }
 
