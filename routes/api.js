@@ -1,9 +1,37 @@
 const express = require('express');
 const router = express.Router();
+const path = require('path');
+const fs = require('fs');
+const multer = require('multer');
 
 const { onlineUsers } = require('../sockets');
 const { getProfileById, clean } = require('../helpers');
 const { data, saveData } = require('../data');
+
+const uploadDir = path.join(__dirname, '..', 'public', 'group-icons');
+if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, uploadDir),
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    cb(null, `group-${Date.now()}-${Math.round(Math.random() * 1e9)}${ext}`);
+  }
+});
+
+const fileFilter = (req, file, cb) => {
+  if (file.mimetype && file.mimetype.startsWith('image/')) {
+    cb(null, true);
+  } else {
+    cb(new Error('Only image files are allowed'));
+  }
+};
+
+const upload = multer({
+  storage,
+  fileFilter,
+  limits: { fileSize: 2 * 1024 * 1024 }
+});
 
 // ==================== PROFILE ====================
 router.get("/profile/:id", (req, res) => {
@@ -12,10 +40,10 @@ router.get("/profile/:id", (req, res) => {
     if (!profile) {
       return res.status(404).json({ error: "User not found" });
     }
-    // ✅ THIS WAS MISSING — we explicitly send bio from data
+
     res.json({
       ...profile,
-      bio: profile.bio ?? "" // if no bio yet, send empty string
+      bio: profile.bio ?? ""
     });
   } catch (err) {
     console.error("Profile API Error:", err);
@@ -23,17 +51,14 @@ router.get("/profile/:id", (req, res) => {
   }
 });
 
-// ✅ FIXED SAVE BIO — now saves correctly to userProfiles
 router.post("/profile/update-bio", (req, res) => {
   try {
     const { userId, bio } = req.body;
     if (!userId) return res.json({ success: false });
 
-    // ✅ Find by ID and save bio properly
     const profile = Object.values(data.userProfiles).find(p => p.id === Number(userId));
     if (!profile) return res.json({ success: false });
 
-    // Save and clean
     profile.bio = bio.trim().slice(0, 500);
     saveData();
 
@@ -79,11 +104,11 @@ router.get("/search/users", (req, res) => {
     const start = (page - 1) * limit;
     const results = matches.slice(start, start + limit);
 
-    res.json({ 
-      results, 
-      total, 
-      page, 
-      pages 
+    res.json({
+      results,
+      total,
+      page,
+      pages
     });
   } catch (err) {
     console.error("Search API Error:", err);
@@ -92,37 +117,47 @@ router.get("/search/users", (req, res) => {
 });
 
 // ==================== GROUPS ====================
-
-// ✅ Create new group
-router.post("/groups/create", (req, res) => {
+router.post("/groups/create", upload.single("icon"), (req, res) => {
   try {
-    const { name, iconUrl, description, createdBy, createdById } = req.body;
-    if (!name || name.trim().length < 3) return res.json({ success: false, error: "Name too short" });
+    const { name, description, createdBy, createdById } = req.body;
+
+    if (!name || name.trim().length < 3) {
+      return res.json({ success: false, error: "Name too short" });
+    }
+
+    if (!description || description.trim().length < 5) {
+      return res.json({ success: false, error: "Description too short" });
+    }
+
+    const iconUrl = req.file
+      ? `/group-icons/${req.file.filename}`
+      : `/images/default-group.png`;
 
     const newGroup = {
       id: data.nextGroupId++,
       name: name.trim(),
-      iconUrl: iconUrl || "/images/default-group.png",
-      createdBy: createdBy,
-      createdById: createdById,
+      iconUrl,
+      createdBy: createdBy || "",
+      createdById: Number(createdById || 0),
       description: description.trim(),
       createdDate: new Date().toISOString()
     };
 
     data.groups.push(newGroup);
     saveData();
+
     res.json({ success: true, groupId: newGroup.id });
   } catch (err) {
-    res.json({ success: false, error: "Server error" });
+    console.error("Create Group Error:", err);
+    res.json({ success: false, error: err.message || "Server error" });
   }
 });
 
-// ✅ Get single group by ID
 router.get("/groups/:id", (req, res) => {
   try {
     const groupId = Number(req.params.id);
     const group = data.groups.find(g => g.id === groupId);
-    
+
     if (!group) {
       return res.status(404).json({ error: "Group not found" });
     }
