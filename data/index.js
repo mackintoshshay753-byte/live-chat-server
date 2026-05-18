@@ -11,8 +11,8 @@ const DEFAULT_DATA = {
   usernameToId: {},
   friendRequests: {},
   friends: {},
-  groups: [],        // ✅ MUST HAVE THIS
-  nextGroupId: 1     // ✅ MUST HAVE THIS
+  groups: [],
+  nextGroupId: 1
 };
 
 let data = { ...DEFAULT_DATA };
@@ -26,8 +26,14 @@ function loadData() {
   try {
     const raw = fs.readFileSync(DATA_PATH, 'utf8');
     const loaded = JSON.parse(raw);
-    data = { ...DEFAULT_DATA, ...loaded };
-    console.log("✅ Data loaded — ID 1 & all users preserved");
+    // ✅ Merge safely, keep old data but ensure new fields exist
+    data = {
+      ...DEFAULT_DATA,
+      ...loaded,
+      groups: Array.isArray(loaded.groups) ? loaded.groups : [],
+      nextGroupId: typeof loaded.nextGroupId === 'number' ? loaded.nextGroupId : 1
+    };
+    console.log("✅ Data loaded — groups ready");
   } catch (err) {
     console.error("⚠️ Data read error — backup saved, starting fresh");
     if (fs.existsSync(DATA_PATH)) fs.renameSync(DATA_PATH, DATA_PATH + `.bak-${Date.now()}.json`);
