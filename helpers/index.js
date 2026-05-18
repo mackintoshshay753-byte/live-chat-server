@@ -17,7 +17,8 @@ function createProfile(username) {
     username,
     joinDate: new Date().toISOString(),
     lastOnline: new Date().toISOString(),
-    theme: "light"
+    theme: "light",
+    bio: "" // ✅ ADDED: empty bio by default for new users
   };
 
   data.userProfiles[username] = profile;
@@ -43,7 +44,8 @@ function getProfileById(id) {
     username: currentUsername || profile.username,
     joinDate: profile.joinDate,
     lastOnline: profile.lastOnline || null,
-    theme: profile.theme
+    theme: profile.theme,
+    bio: profile.bio || "" // ✅ ADDED: return bio value
   };
 }
 

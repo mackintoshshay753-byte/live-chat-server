@@ -1,10 +1,9 @@
 const express = require('express');
 const router = express.Router();
 
-// ✅ This now works perfectly because exports are fixed
 const { onlineUsers } = require('../sockets');
 const { getProfileById, clean } = require('../helpers');
-const { data, saveData } = require('../data'); // ✅ Added saveData
+const { data, saveData } = require('../data');
 
 // ==================== PROFILE ====================
 router.get("/profile/:id", (req, res) => {
@@ -13,10 +12,10 @@ router.get("/profile/:id", (req, res) => {
     if (!profile) {
       return res.status(404).json({ error: "User not found" });
     }
-    // ✅ Make sure bio is included in response (default to empty string)
+    // ✅ THIS WAS MISSING — we explicitly send bio from data
     res.json({
       ...profile,
-      bio: profile.bio || ""
+      bio: profile.bio ?? "" // if no bio yet, send empty string
     });
   } catch (err) {
     console.error("Profile API Error:", err);
@@ -24,17 +23,17 @@ router.get("/profile/:id", (req, res) => {
   }
 });
 
-// ✅ NEW ROUTE: SAVE BIO
+// ✅ FIXED SAVE BIO — now saves correctly to userProfiles
 router.post("/profile/update-bio", (req, res) => {
   try {
     const { userId, bio } = req.body;
     if (!userId) return res.json({ success: false });
 
-    // Find profile by user ID
+    // ✅ Find by ID and save bio properly
     const profile = Object.values(data.userProfiles).find(p => p.id === Number(userId));
     if (!profile) return res.json({ success: false });
 
-    // Save and clean bio (max 500 chars)
+    // Save and clean
     profile.bio = bio.trim().slice(0, 500);
     saveData();
 
@@ -45,7 +44,7 @@ router.post("/profile/update-bio", (req, res) => {
   }
 });
 
-// ==================== SEARCH USERS (FIXED ONLINE STATUS) ====================
+// ==================== SEARCH USERS ====================
 router.get("/search/users", (req, res) => {
   try {
     let keyword = clean(req.query.keyword || "");
@@ -59,14 +58,9 @@ router.get("/search/users", (req, res) => {
     keyword = keyword.toLowerCase();
     const matches = [];
 
-    // ✅ Log to debug
-    console.log("🔍 Searching for:", keyword, "| Online users:", Array.from(onlineUsers.keys()));
-
     Object.entries(data.accounts).forEach(([username, info]) => {
       if (username.toLowerCase().includes(keyword)) {
         const profile = data.userProfiles[username] || {};
-
-        // ✅ Direct check — works now
         const isOnline = onlineUsers.has(username);
 
         matches.push({
