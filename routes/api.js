@@ -1,24 +1,26 @@
 const express = require('express');
 const router = express.Router();
+
+// Import onlineUsers from sockets
+const { onlineUsers } = require('../sockets');
 const { getProfileById, clean } = require('../helpers');
 const { data } = require('../data');
-
-// Import onlineUsers from sockets (we'll share it)
-const { onlineUsers } = require('../sockets');   // ← Add this line
 
 // ==================== PROFILE ====================
 router.get("/profile/:id", (req, res) => {
   try {
     const profile = getProfileById(req.params.id);
-    if (!profile) return res.status(404).json({ error: "User not found" });
+    if (!profile) {
+      return res.status(404).json({ error: "User not found" });
+    }
     res.json(profile);
   } catch (err) {
-    console.error(err);
+    console.error("Profile API Error:", err);
     res.status(500).json({ error: "Server error" });
   }
 });
 
-// ==================== SEARCH USERS (Updated with Online Status) ====================
+// ==================== SEARCH USERS (with Online Status) ====================
 router.get("/search/users", (req, res) => {
   try {
     let keyword = clean(req.query.keyword || "");
@@ -34,15 +36,15 @@ router.get("/search/users", (req, res) => {
 
     Object.entries(data.accounts).forEach(([username, info]) => {
       if (username.toLowerCase().includes(keyword)) {
-        const profile = data.userProfiles[username];
-        
+        const profile = data.userProfiles[username] || {};
+
         const isOnline = onlineUsers.has(username);
 
         matches.push({
           id: info.id,
           username: username,
           isOnline: isOnline,
-          lastOnline: profile ? profile.lastOnline : null
+          lastOnline: profile.lastOnline || null
         });
       }
     });

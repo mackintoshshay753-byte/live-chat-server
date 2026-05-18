@@ -92,7 +92,7 @@ function setupSockets(io) {
       }
     });
 
-    // ==================== OTHER ====================
+    // ==================== OTHER HANDLERS ====================
     socket.on("save-theme", ({ theme, username }) => {
       try {
         const account = data.accounts[username];
@@ -182,8 +182,6 @@ function safeCb(cb, data) {
   if (typeof cb === "function") cb(data);
 }
 
-// ==================== EXPORT BOTH ====================
-module.exports = { 
-  setupSockets, 
-  onlineUsers 
-};
+// ==================== EXPORTS ====================
+module.exports = setupSockets;           // Default export (required by server.js)
+module.exports.onlineUsers = onlineUsers; // Named export for api.js
