@@ -1,5 +1,5 @@
 const sanitizeHtml = require('sanitize-html');
-const { data, saveData } = require('../data');
+const { data, saveData } = require('./data');
 
 function clean(input) {
   return sanitizeHtml(String(input || '').trim(), { 
@@ -11,9 +11,8 @@ function clean(input) {
 function createProfile(username) {
   if (data.userProfiles[username]) return data.userProfiles[username];
 
-  // Use the ID that was already assigned in signup
   const profile = {
-    id: data.nextUserId - 1,        // Important fix
+    id: data.nextUserId - 1,
     username,
     joinDate: new Date().toISOString(),
     lastOnline: new Date().toISOString(),
@@ -33,7 +32,6 @@ function getProfileById(id) {
   const profile = Object.values(data.userProfiles).find(p => Number(p.id) === id);
   if (!profile) return null;
 
-  // Get latest username in case it changed
   const currentUsername = Object.keys(data.accounts).find(
     name => data.accounts[name].id === profile.id
   );
