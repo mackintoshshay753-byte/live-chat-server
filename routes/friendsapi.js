@@ -5,18 +5,22 @@ const { data, saveData } = require('../data');
 // Send friend request
 router.post("/request", (req, res) => {
   const { fromId, fromUsername, toId } = req.body;
-  if (!fromId || !toId || fromId === toId) return res.json({ success: false, error: "Invalid" });
+  const fromIdNum = Number(fromId);
+  const toIdNum = Number(toId);
 
-  if (!data.friendRequests[toId]) data.friendRequests[toId] = [];
+  if (!fromIdNum || !toIdNum || fromIdNum === toIdNum) 
+    return res.json({ success: false, error: "Invalid" });
 
-  const alreadyRequested = data.friendRequests[toId].some(r => r.fromId === fromId);
+  if (!data.friendRequests[toIdNum]) data.friendRequests[toIdNum] = [];
+
+  const alreadyRequested = data.friendRequests[toIdNum].some(r => r.fromId === fromIdNum);
   if (alreadyRequested) return res.json({ success: false, error: "Already requested" });
 
-  const alreadyFriends = data.friends[fromId]?.includes(toId);
+  const alreadyFriends = data.friends[fromIdNum]?.includes(toIdNum);
   if (alreadyFriends) return res.json({ success: false, error: "Already friends" });
 
-  data.friendRequests[toId].push({
-    fromId,
+  data.friendRequests[toIdNum].push({
+    fromId: fromIdNum,
     fromUsername,
     timestamp: new Date().toISOString()
   });
@@ -26,23 +30,26 @@ router.post("/request", (req, res) => {
 
 // Get my incoming requests
 router.get("/requests/:userId", (req, res) => {
-  const userId = req.params.userId; // ✅ NO Number() — keep as string
+  const userId = Number(req.params.userId);
   res.json({ requests: data.friendRequests[userId] || [] });
 });
 
 // Accept request
 router.post("/accept", (req, res) => {
   const { fromId, toId } = req.body;
-  if (!fromId || !toId) return res.json({ success: false });
+  const fromIdNum = Number(fromId);
+  const toIdNum = Number(toId);
 
-  if (data.friendRequests[toId]) {
-    data.friendRequests[toId] = data.friendRequests[toId].filter(r => r.fromId !== fromId);
+  if (!fromIdNum || !toIdNum) return res.json({ success: false });
+
+  if (data.friendRequests[toIdNum]) {
+    data.friendRequests[toIdNum] = data.friendRequests[toIdNum].filter(r => r.fromId !== fromIdNum);
   }
 
-  if (!data.friends[fromId]) data.friends[fromId] = [];
-  if (!data.friends[toId]) data.friends[toId] = [];
-  if (!data.friends[fromId].includes(toId)) data.friends[fromId].push(toId);
-  if (!data.friends[toId].includes(fromId)) data.friends[toId].push(fromId);
+  if (!data.friends[fromIdNum]) data.friends[fromIdNum] = [];
+  if (!data.friends[toIdNum]) data.friends[toIdNum] = [];
+  if (!data.friends[fromIdNum].includes(toIdNum)) data.friends[fromIdNum].push(toIdNum);
+  if (!data.friends[toIdNum].includes(fromIdNum)) data.friends[toIdNum].push(fromIdNum);
 
   saveData();
   res.json({ success: true });
@@ -51,8 +58,11 @@ router.post("/accept", (req, res) => {
 // Reject request
 router.post("/reject", (req, res) => {
   const { fromId, toId } = req.body;
-  if (data.friendRequests[toId]) {
-    data.friendRequests[toId] = data.friendRequests[toId].filter(r => r.fromId !== fromId);
+  const fromIdNum = Number(fromId);
+  const toIdNum = Number(toId);
+
+  if (data.friendRequests[toIdNum]) {
+    data.friendRequests[toIdNum] = data.friendRequests[toIdNum].filter(r => r.fromId !== fromIdNum);
     saveData();
   }
   res.json({ success: true });
@@ -61,19 +71,22 @@ router.post("/reject", (req, res) => {
 // Unfriend
 router.post("/unfriend", (req, res) => {
   const { userId, friendId } = req.body;
-  if (data.friends[userId]) data.friends[userId] = data.friends[userId].filter(id => id !== friendId);
-  if (data.friends[friendId]) data.friends[friendId] = data.friends[friendId].filter(id => id !== userId);
+  const userIdNum = Number(userId);
+  const friendIdNum = Number(friendId);
+
+  if (data.friends[userIdNum]) data.friends[userIdNum] = data.friends[userIdNum].filter(id => id !== friendIdNum);
+  if (data.friends[friendIdNum]) data.friends[friendIdNum] = data.friends[friendIdNum].filter(id => id !== userIdNum);
   saveData();
   res.json({ success: true });
 });
 
 // Get my friends list
 router.get("/list/:userId", (req, res) => {
-  const userId = req.params.userId; // ✅ NO Number()
+  const userId = Number(req.params.userId);
   const friendIds = data.friends[userId] || [];
 
   const friends = Object.entries(data.accounts).map(([username, info]) => ({
-    id: String(info.id), // ✅ Save as string to match
+    id: info.id,
     username
   })).filter(u => friendIds.includes(u.id));
 
