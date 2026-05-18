@@ -1,46 +1,61 @@
 const express = require('express');
 const router = express.Router();
+const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
-const multer = require('multer');
 
 const { onlineUsers } = require('../sockets');
 const { getProfileById, clean } = require('../helpers');
 const { data, saveData } = require('../data');
 
-const uploadDir = path.join(__dirname, '..', 'public', 'group-icons');
-if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+// ----------------------
+// IMAGE UPLOAD CONFIG
+// ----------------------
+// Create uploads folder if it doesn't exist
+const UPLOAD_FOLDER = path.join(__dirname, '../public/uploads/groups');
+if (!fs.existsSync(UPLOAD_FOLDER)) {
+  fs.mkdirSync(UPLOAD_FOLDER, { recursive: true });
+}
 
+// Configure storage
 const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, uploadDir),
-  filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname).toLowerCase();
-    cb(null, `group-${Date.now()}-${Math.round(Math.random() * 1e9)}${ext}`);
+  destination: function (req, file, cb) {
+    cb(null, UPLOAD_FOLDER);
+  },
+  filename: function (req, file, cb) {
+    // Create unique filename: group-[id]-[timestamp].[ext]
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    const ext = path.extname(file.originalname);
+    cb(null, 'group-' + uniqueSuffix + ext);
   }
 });
 
+// Filter allowed file types
 const fileFilter = (req, file, cb) => {
-  if (file.mimetype && file.mimetype.startsWith('image/')) {
+  const allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+  if (allowedTypes.includes(file.mimetype)) {
     cb(null, true);
   } else {
-    cb(new Error('Only image files are allowed'));
+    cb(new Error('Only JPG, PNG, GIF, WEBP files are allowed'), false);
   }
 };
 
+// Initialize upload middleware
 const upload = multer({
-  storage,
-  fileFilter,
-  limits: { fileSize: 2 * 1024 * 1024 }
+  storage: storage,
+  fileFilter: fileFilter,
+  limits: { fileSize: 5 * 1024 * 1024 } // 5MB max
 });
 
-// ==================== PROFILE ====================
+// ----------------------
+// PROFILE
+// ----------------------
 router.get("/profile/:id", (req, res) => {
   try {
     const profile = getProfileById(req.params.id);
     if (!profile) {
       return res.status(404).json({ error: "User not found" });
     }
-
     res.json({
       ...profile,
       bio: profile.bio ?? ""
@@ -69,7 +84,9 @@ router.post("/profile/update-bio", (req, res) => {
   }
 });
 
-// ==================== SEARCH USERS ====================
+// ----------------------
+// SEARCH USERS
+// ----------------------
 router.get("/search/users", (req, res) => {
   try {
     let keyword = clean(req.query.keyword || "");
@@ -116,38 +133,43 @@ router.get("/search/users", (req, res) => {
   }
 });
 
-// ==================== GROUPS ====================
-router.post("/groups/create", upload.single("icon"), (req, res) => {
+// ----------------------
+// GROUPS
+// ----------------------
+
+// ✅ UPDATED: Create group WITH image upload
+router.post("/groups/create", upload.single('groupIcon'), (req, res) => {
   try {
     const { name, description, createdBy, createdById } = req.body;
-
+    
     if (!name || name.trim().length < 3) {
+      // Delete uploaded file if validation fails
+      if (req.file) fs.unlinkSync(req.file.path);
       return res.json({ success: false, error: "Name too short" });
     }
 
-    if (!description || description.trim().length < 5) {
-      return res.json({ success: false, error: "Description too short" });
+    // Get image URL if uploaded, else use default
+    let iconUrl = "/uploads/groups/default-group.png";
+    if (req.file) {
+      iconUrl = "/uploads/groups/" + req.file.filename;
     }
-
-    const iconUrl = req.file
-      ? `/group-icons/${req.file.filename}`
-      : `/images/default-group.png`;
 
     const newGroup = {
       id: data.nextGroupId++,
       name: name.trim(),
-      iconUrl,
-      createdBy: createdBy || "",
-      createdById: Number(createdById || 0),
-      description: description.trim(),
+      iconUrl: iconUrl,
+      createdBy: createdBy,
+      createdById: createdById,
+      description: description ? description.trim() : "",
       createdDate: new Date().toISOString()
     };
 
     data.groups.push(newGroup);
     saveData();
-
     res.json({ success: true, groupId: newGroup.id });
   } catch (err) {
+    // Delete uploaded file if error
+    if (req.file) fs.unlinkSync(req.file.path);
     console.error("Create Group Error:", err);
     res.json({ success: false, error: err.message || "Server error" });
   }
