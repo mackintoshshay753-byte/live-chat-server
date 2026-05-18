@@ -38,6 +38,7 @@ router.get("/search/users", (req, res) => {
     Object.entries(data.accounts).forEach(([username, info]) => {
       if (username.toLowerCase().includes(keyword)) {
         const profile = data.userProfiles[username] || {};
+        // Check if user is currently online
         const isOnline = onlineUsers.has(username);
 
         console.log(`[Search] ${username} → Online: ${isOnline}`);
@@ -45,7 +46,7 @@ router.get("/search/users", (req, res) => {
         matches.push({
           id: info.id,
           username: username,
-          isOnline: isOnline,
+          isOnline: isOnline, // ✅ Send online status to frontend
           lastOnline: profile.lastOnline || null
         });
       }
