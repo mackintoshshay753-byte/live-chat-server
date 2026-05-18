@@ -57,7 +57,7 @@ function setupSockets(io) {
       }
     });
 
-        socket.on("signup", async ({ username, password }, cb) => {
+    socket.on("signup", async ({ username, password }, cb) => {
       try {
         const name = clean(username);
         const lowerName = name.toLowerCase();
@@ -182,4 +182,8 @@ function safeCb(cb, data) {
   if (typeof cb === "function") cb(data);
 }
 
-module.exports = setupSockets;
+// ==================== EXPORT BOTH ====================
+module.exports = { 
+  setupSockets, 
+  onlineUsers 
+};
