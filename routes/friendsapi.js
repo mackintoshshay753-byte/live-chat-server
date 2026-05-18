@@ -97,7 +97,7 @@ router.post("/unfriend", (req, res) => {
   res.json({ success: true });
 });
 
-// ✅ Get friends list + ONLINE STATUS
+// ✅ Get friends list + ONLINE STATUS — PERFECT
 router.get("/list/:userId", (req, res) => {
   const userId = Number(req.params.userId);
   const friendIds = data.friends[userId] || [];
@@ -105,7 +105,7 @@ router.get("/list/:userId", (req, res) => {
   const friends = Object.entries(data.accounts).map(([username, info]) => ({
     id: info.id,
     username,
-    isOnline: onlineUsers.has(Number(info.id)) // ✅ send online status
+    isOnline: onlineUsers.has(Number(info.id)) // ✅ TRUE = ONLINE, FALSE = OFFLINE
   })).filter(u => friendIds.includes(u.id));
 
   res.json({ friends });
