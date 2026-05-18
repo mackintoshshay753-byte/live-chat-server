@@ -1,10 +1,16 @@
 const express = require('express');
 const router = express.Router();
 
-const sockets = require('../sockets');
-const { onlineUsers } = sockets;           // Import onlineUsers
 const { getProfileById, clean } = require('../helpers');
 const { data } = require('../data');
+
+// Try multiple ways to get onlineUsers
+let onlineUsers;
+try {
+  onlineUsers = require('../sockets').onlineUsers || global.onlineUsers;
+} catch (e) {
+  onlineUsers = global.onlineUsers || new Map();
+}
 
 // ==================== PROFILE ====================
 router.get("/profile/:id", (req, res) => {
@@ -32,7 +38,7 @@ router.get("/search/users", (req, res) => {
     keyword = keyword.toLowerCase();
     const matches = [];
 
-    console.log(`[Search] Query: "${keyword}" | Currently online: ${onlineUsers.size}`);
+    console.log(`[Search] Query: "${keyword}" | Online users: ${onlineUsers.size}`);
 
     Object.entries(data.accounts).forEach(([username, info]) => {
       if (username.toLowerCase().includes(keyword)) {
