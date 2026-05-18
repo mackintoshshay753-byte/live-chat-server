@@ -57,7 +57,7 @@ function setupSockets(io) {
       }
     });
 
-        socket.on("signup", async ({ username, password }, cb) => {
+    socket.on("signup", async ({ username, password }, cb) => {
       try {
         const name = clean(username);
         const lowerName = name.toLowerCase();
@@ -92,7 +92,7 @@ function setupSockets(io) {
       }
     });
 
-    // ==================== OTHER ====================
+    // ==================== OTHER HANDLERS ====================
     socket.on("save-theme", ({ theme, username }) => {
       try {
         const account = data.accounts[username];
@@ -182,4 +182,6 @@ function safeCb(cb, data) {
   if (typeof cb === "function") cb(data);
 }
 
-module.exports = setupSockets;
+// ==================== EXPORTS ====================
+module.exports = setupSockets;           // Default export (required by server.js)
+module.exports.onlineUsers = onlineUsers; // Named export for api.js
