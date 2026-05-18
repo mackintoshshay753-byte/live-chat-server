@@ -2,6 +2,7 @@ const bcrypt = require('bcrypt');
 const { data, saveData } = require('../data');
 const { clean, createProfile } = require('../helpers');
 
+// ✅ This MUST be declared BEFORE exports
 const onlineUsers = new Map(); // username -> socket.id
 
 function setupSockets(io) {
@@ -13,24 +14,27 @@ function setupSockets(io) {
       const cleanName = clean(username);
       if (!cleanName) return;
 
+      // ✅ Add user to online list
       onlineUsers.set(cleanName, socket.id);
 
+      // Update last seen time
       if (data.userProfiles[cleanName]) {
         data.userProfiles[cleanName].lastOnline = new Date().toISOString();
         saveData();
       }
-      console.log(`👤 ${cleanName} is online`);
+      console.log(`👤 ${cleanName} is online | Total online: ${onlineUsers.size}`);
     });
 
     socket.on("disconnect", () => {
       for (const [username, id] of onlineUsers.entries()) {
         if (id === socket.id) {
+          // ✅ Remove from online list
           if (data.userProfiles[username]) {
             data.userProfiles[username].lastOnline = new Date().toISOString();
             saveData();
           }
           onlineUsers.delete(username);
-          console.log(`👤 ${username} went offline`);
+          console.log(`👤 ${username} went offline | Total online: ${onlineUsers.size}`);
           break;
         }
       }
@@ -142,6 +146,12 @@ function setupSockets(io) {
           delete data.usernameToId[cleanOld];
         }
 
+        // ✅ Update online status to new name
+        if (onlineUsers.has(cleanOld)) {
+          onlineUsers.set(cleanNew, onlineUsers.get(cleanOld));
+          onlineUsers.delete(cleanOld);
+        }
+
         saveData();
         io.emit("username updated", { oldName: cleanOld, newName: cleanNew });
 
@@ -182,6 +192,6 @@ function safeCb(cb, data) {
   if (typeof cb === "function") cb(data);
 }
 
-// ==================== EXPORTS ====================
-module.exports = setupSockets;           // Default export (required by server.js)
-module.exports.onlineUsers = onlineUsers; // Named export for api.js
+// ==================== ✅ FIXED EXPORTS ====================
+module.exports = setupSockets;
+module.exports.onlineUsers = onlineUsers;

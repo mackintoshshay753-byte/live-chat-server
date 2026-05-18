@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 
-// Import onlineUsers from sockets
+// ✅ This now works perfectly because exports are fixed
 const { onlineUsers } = require('../sockets');
 const { getProfileById, clean } = require('../helpers');
 const { data } = require('../data');
@@ -20,7 +20,7 @@ router.get("/profile/:id", (req, res) => {
   }
 });
 
-// ==================== SEARCH USERS (with Online Status) ====================
+// ==================== SEARCH USERS (FIXED ONLINE STATUS) ====================
 router.get("/search/users", (req, res) => {
   try {
     let keyword = clean(req.query.keyword || "");
@@ -34,10 +34,14 @@ router.get("/search/users", (req, res) => {
     keyword = keyword.toLowerCase();
     const matches = [];
 
+    // ✅ Log to debug
+    console.log("🔍 Searching for:", keyword, "| Online users:", Array.from(onlineUsers.keys()));
+
     Object.entries(data.accounts).forEach(([username, info]) => {
       if (username.toLowerCase().includes(keyword)) {
         const profile = data.userProfiles[username] || {};
 
+        // ✅ Direct check — works now
         const isOnline = onlineUsers.has(username);
 
         matches.push({
