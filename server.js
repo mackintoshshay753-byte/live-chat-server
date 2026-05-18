@@ -25,17 +25,46 @@ const io = new Server(server, {
 const { loadData } = require('./data');
 loadData();
 
-// Setup sockets
+// ✅ Load friends API with status tracking
+const friendsApi = require('./routes/friendsapi');
+
+// Setup sockets — keep your original setup
 const setupSockets = require('./sockets');
 setupSockets(io);
 
+// ✅ WRAP the original socket logic to add online tracking
+io.of("/").on("connection", (socket) => {
+  // --- YOUR ORIGINAL SOCKET EVENTS (from sockets/index.js) stay untouched ---
+  // We just add these new ones below:
+
+  // ✅ When user logs in → mark as online
+  socket.on("login", async (data, cb) => {
+    // First run your original login logic from sockets/index.js
+    // ... (original code runs)
+
+    // ✅ Then mark user as online
+    if (data && data.id) {
+      socket.userId = Number(data.id); // store ID on socket
+      friendsApi.userConnect(socket.userId);
+      io.emit("user-status-changed", { userId: socket.userId, isOnline: true });
+    }
+  });
+
+  // ✅ When user disconnects → mark as offline
+  socket.on("disconnect", () => {
+    if (socket.userId) {
+      friendsApi.userDisconnect(socket.userId);
+      io.emit("user-status-changed", { userId: socket.userId, isOnline: false });
+    }
+  });
+});
+
 // Load routes
 const apiRoutes = require('./routes/api');
-const friendsApiRoutes = require('./routes/friendsapi'); // ✅ ADDED — loads your new friend system routes
 const pageRoutes = require('./routes/pages');
 
 app.use('/api', apiRoutes);
-app.use('/api/friends', friendsApiRoutes); // ✅ ADDED — makes all /api/friends/... URLs work
+app.use('/api/friends', friendsApi.router); // ✅ Use the router from friendsapi
 app.use('/', pageRoutes);
 
 server.listen(PORT, () => console.log("✅ Server running on port", PORT));

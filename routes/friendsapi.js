@@ -2,6 +2,23 @@ const express = require('express');
 const router = express.Router();
 const { data, saveData } = require('../data');
 
+// ✅ Track online users
+const onlineUsers = new Set();
+
+// ✅ Called from server.js when user connects/disconnects
+function userConnect(userId) {
+  const id = Number(userId);
+  if (id) onlineUsers.add(id);
+}
+function userDisconnect(userId) {
+  const id = Number(userId);
+  if (id) onlineUsers.delete(id);
+}
+
+// --------------------------
+// ✅ FRIEND SYSTEM API ROUTES
+// --------------------------
+
 // Send friend request
 router.post("/request", (req, res) => {
   const { fromId, fromUsername, toId } = req.body;
@@ -80,17 +97,18 @@ router.post("/unfriend", (req, res) => {
   res.json({ success: true });
 });
 
-// Get my friends list
+// ✅ Get friends list + ONLINE STATUS
 router.get("/list/:userId", (req, res) => {
   const userId = Number(req.params.userId);
   const friendIds = data.friends[userId] || [];
 
   const friends = Object.entries(data.accounts).map(([username, info]) => ({
     id: info.id,
-    username
+    username,
+    isOnline: onlineUsers.has(Number(info.id)) // ✅ send online status
   })).filter(u => friendIds.includes(u.id));
 
   res.json({ friends });
 });
 
-module.exports = router;
+module.exports = { router, userConnect, userDisconnect };
