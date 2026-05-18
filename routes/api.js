@@ -91,4 +91,47 @@ router.get("/search/users", (req, res) => {
   }
 });
 
+// ==================== GROUPS ====================
+
+// ✅ Create new group
+router.post("/groups/create", (req, res) => {
+  try {
+    const { name, iconUrl, description, createdBy, createdById } = req.body;
+    if (!name || name.trim().length < 3) return res.json({ success: false, error: "Name too short" });
+
+    const newGroup = {
+      id: data.nextGroupId++,
+      name: name.trim(),
+      iconUrl: iconUrl || "/images/default-group.png",
+      createdBy: createdBy,
+      createdById: createdById,
+      description: description.trim(),
+      createdDate: new Date().toISOString()
+    };
+
+    data.groups.push(newGroup);
+    saveData();
+    res.json({ success: true, groupId: newGroup.id });
+  } catch (err) {
+    res.json({ success: false, error: "Server error" });
+  }
+});
+
+// ✅ Get single group by ID
+router.get("/groups/:id", (req, res) => {
+  try {
+    const groupId = Number(req.params.id);
+    const group = data.groups.find(g => g.id === groupId);
+    
+    if (!group) {
+      return res.status(404).json({ error: "Group not found" });
+    }
+
+    res.json(group);
+  } catch (err) {
+    console.error("Get Group Error:", err);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
 module.exports = router;

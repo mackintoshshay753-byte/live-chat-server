@@ -11,7 +11,9 @@ const DEFAULT_DATA = {
   userProfiles: {},
   usernameToId: {},
   friendRequests: {}, // ✅ NEW — stores pending requests
-  friends: {}        // ✅ NEW — stores confirmed friends
+  friends: {},        // ✅ NEW — stores confirmed friends
+  groups: [],         // ✅ ADDED — stores all groups
+  nextGroupId: 1      // ✅ ADDED — auto-increment group IDs
 };
 
 let data = { ...DEFAULT_DATA };
