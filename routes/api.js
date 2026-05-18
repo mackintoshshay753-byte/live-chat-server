@@ -4,7 +4,7 @@ const router = express.Router();
 // ✅ This now works perfectly because exports are fixed
 const { onlineUsers } = require('../sockets');
 const { getProfileById, clean } = require('../helpers');
-const { data } = require('../data');
+const { data, saveData } = require('../data'); // ✅ Added saveData
 
 // ==================== PROFILE ====================
 router.get("/profile/:id", (req, res) => {
@@ -13,10 +13,35 @@ router.get("/profile/:id", (req, res) => {
     if (!profile) {
       return res.status(404).json({ error: "User not found" });
     }
-    res.json(profile);
+    // ✅ Make sure bio is included in response (default to empty string)
+    res.json({
+      ...profile,
+      bio: profile.bio || ""
+    });
   } catch (err) {
     console.error("Profile API Error:", err);
     res.status(500).json({ error: "Server error" });
+  }
+});
+
+// ✅ NEW ROUTE: SAVE BIO
+router.post("/profile/update-bio", (req, res) => {
+  try {
+    const { userId, bio } = req.body;
+    if (!userId) return res.json({ success: false });
+
+    // Find profile by user ID
+    const profile = Object.values(data.userProfiles).find(p => p.id === Number(userId));
+    if (!profile) return res.json({ success: false });
+
+    // Save and clean bio (max 500 chars)
+    profile.bio = bio.trim().slice(0, 500);
+    saveData();
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error("Update Bio API Error:", err);
+    res.json({ success: false });
   }
 });
 
