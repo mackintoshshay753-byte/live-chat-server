@@ -4,13 +4,8 @@ const router = express.Router();
 const { getProfileById, clean } = require('../helpers');
 const { data } = require('../data');
 
-// Try multiple ways to get onlineUsers
-let onlineUsers;
-try {
-  onlineUsers = require('../sockets').onlineUsers || global.onlineUsers;
-} catch (e) {
-  onlineUsers = global.onlineUsers || new Map();
-}
+// Use global onlineUsers as main source
+const onlineUsers = global.onlineUsers || new Map();
 
 // ==================== PROFILE ====================
 router.get("/profile/:id", (req, res) => {
@@ -45,7 +40,7 @@ router.get("/search/users", (req, res) => {
         const profile = data.userProfiles[username] || {};
         const isOnline = onlineUsers.has(username);
 
-        console.log(`[Search] User: ${username} → Online: ${isOnline}`);
+        console.log(`[Search] ${username} → Online: ${isOnline}`);
 
         matches.push({
           id: info.id,

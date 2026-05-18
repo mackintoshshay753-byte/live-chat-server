@@ -183,6 +183,8 @@ function safeCb(cb, data) {
 }
 
 // ==================== EXPORTS ====================
-module.exports = setupSockets;           // Default export (required by server.js)
-module.exports.onlineUsers = onlineUsers; // Named export for api.js
+module.exports = setupSockets;
+module.exports.onlineUsers = onlineUsers;
+
+// Global fallback (this usually fixes Render issues)
 global.onlineUsers = onlineUsers;
