@@ -2,31 +2,27 @@ const bcrypt = require('bcrypt');
 const { data, saveData } = require('../data');
 const { clean, createProfile } = require('../helpers');
 
-// ✅ Critical: Make this GLOBAL so API can access the LIVE version
 const onlineUsers = new Map(); // username -> socket.id
-global.onlineUsers = onlineUsers;
 
 function setupSockets(io) {
   io.on("connection", (socket) => {
     console.log("🔌 User connected");
 
-    // ==================== LAST ONLINE + ONLINE STATUS ====================
+    // ==================== LAST ONLINE ====================
     socket.on("join", (username) => {
       const cleanName = clean(username);
       if (!cleanName) return;
 
-      // Mark user as online
       onlineUsers.set(cleanName, socket.id);
 
       if (data.userProfiles[cleanName]) {
         data.userProfiles[cleanName].lastOnline = new Date().toISOString();
         saveData();
       }
-      console.log(`👤 ${cleanName} is online | Total online: ${onlineUsers.size}`);
+      console.log(`👤 ${cleanName} is online`);
     });
 
     socket.on("disconnect", () => {
-      // Mark user as offline
       for (const [username, id] of onlineUsers.entries()) {
         if (id === socket.id) {
           if (data.userProfiles[username]) {
@@ -34,7 +30,7 @@ function setupSockets(io) {
             saveData();
           }
           onlineUsers.delete(username);
-          console.log(`👤 ${username} went offline | Total online: ${onlineUsers.size}`);
+          console.log(`👤 ${username} went offline`);
           break;
         }
       }
@@ -61,7 +57,7 @@ function setupSockets(io) {
       }
     });
 
-    socket.on("signup", async ({ username, password }, cb) => {
+        socket.on("signup", async ({ username, password }, cb) => {
       try {
         const name = clean(username);
         const lowerName = name.toLowerCase();
@@ -96,7 +92,7 @@ function setupSockets(io) {
       }
     });
 
-    // ==================== OTHER HANDLERS ====================
+    // ==================== OTHER ====================
     socket.on("save-theme", ({ theme, username }) => {
       try {
         const account = data.accounts[username];
@@ -186,6 +182,4 @@ function safeCb(cb, data) {
   if (typeof cb === "function") cb(data);
 }
 
-// ==================== EXPORTS ====================
 module.exports = setupSockets;
-module.exports.onlineUsers = onlineUsers;

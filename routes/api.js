@@ -1,17 +1,17 @@
 const express = require('express');
 const router = express.Router();
-
 const { getProfileById, clean } = require('../helpers');
 const { data } = require('../data');
-
-// ✅ Use the GLOBAL LIVE onlineUsers map
-const onlineUsers = global.onlineUsers || new Map();
 
 // ==================== PROFILE ====================
 router.get("/profile/:id", (req, res) => {
   try {
     const profile = getProfileById(req.params.id);
-    if (!profile) return res.status(404).json({ error: "User not found" });
+    
+    if (!profile) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
     res.json(profile);
   } catch (err) {
     console.error("Profile API Error:", err);
@@ -33,21 +33,11 @@ router.get("/search/users", (req, res) => {
     keyword = keyword.toLowerCase();
     const matches = [];
 
-    console.log(`[Search] Query: "${keyword}" | Online users total: ${onlineUsers.size}`);
-
     Object.entries(data.accounts).forEach(([username, info]) => {
       if (username.toLowerCase().includes(keyword)) {
-        const profile = data.userProfiles[username] || {};
-        // ✅ Check LIVE online status
-        const isOnline = onlineUsers.has(username);
-
-        console.log(`[Search Check] ${username} → Online: ${isOnline}`);
-
         matches.push({
           id: info.id,
-          username: username,
-          isOnline: isOnline, // ✅ This is what your frontend uses
-          lastOnline: profile.lastOnline || null
+          username: username
         });
       }
     });
@@ -57,7 +47,8 @@ router.get("/search/users", (req, res) => {
     const total = matches.length;
     const pages = Math.ceil(total / limit);
     const start = (page - 1) * limit;
-    const results = matches.slice(start, start + limit);
+    const end = start + limit;
+    const results = matches.slice(start, end);
 
     res.json({ results, total, page, pages });
   } catch (err) {
