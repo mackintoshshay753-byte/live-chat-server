@@ -8,7 +8,7 @@ function setupSockets(io) {
   io.on("connection", (socket) => {
     console.log("🔌 User connected");
 
-    // ==================== LAST ONLINE — NOW WORKS ON ANY PAGE ====================
+    // ==================== LAST ONLINE ====================
     socket.on("join", (username) => {
       const cleanName = clean(username);
       if (!cleanName) return;
@@ -16,7 +16,6 @@ function setupSockets(io) {
       onlineUsers.set(cleanName, socket.id);
 
       if (data.userProfiles[cleanName]) {
-        // Update last online EVERY time you enter any page
         data.userProfiles[cleanName].lastOnline = new Date().toISOString();
         saveData();
       }
@@ -177,9 +176,6 @@ function setupSockets(io) {
       }
     });
   });
-
-  // Make onlineUsers available globally
-  global.onlineUsers = onlineUsers;
 }
 
 function safeCb(cb, data) {
@@ -187,5 +183,5 @@ function safeCb(cb, data) {
 }
 
 // ==================== EXPORTS ====================
-module.exports = setupSockets;
-module.exports.onlineUsers = onlineUsers;
+module.exports = setupSockets;           // Default export (required by server.js)
+module.exports.onlineUsers = onlineUsers; // Named export for api.js

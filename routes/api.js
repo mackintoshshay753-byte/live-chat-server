@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 
+// Import onlineUsers from sockets
 const { onlineUsers } = require('../sockets');
 const { getProfileById, clean } = require('../helpers');
 const { data } = require('../data');
@@ -19,7 +20,7 @@ router.get("/profile/:id", (req, res) => {
   }
 });
 
-// ==================== SEARCH USERS ====================
+// ==================== SEARCH USERS (with Online Status) ====================
 router.get("/search/users", (req, res) => {
   try {
     let keyword = clean(req.query.keyword || "");
@@ -36,6 +37,7 @@ router.get("/search/users", (req, res) => {
     Object.entries(data.accounts).forEach(([username, info]) => {
       if (username.toLowerCase().includes(keyword)) {
         const profile = data.userProfiles[username] || {};
+
         const isOnline = onlineUsers.has(username);
 
         matches.push({
@@ -54,7 +56,12 @@ router.get("/search/users", (req, res) => {
     const start = (page - 1) * limit;
     const results = matches.slice(start, start + limit);
 
-    res.json({ results, total, page, pages });
+    res.json({ 
+      results, 
+      total, 
+      page, 
+      pages 
+    });
   } catch (err) {
     console.error("Search API Error:", err);
     res.status(500).json({ error: "Server error" });
