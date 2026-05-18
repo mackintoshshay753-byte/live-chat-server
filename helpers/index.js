@@ -11,8 +11,9 @@ function clean(input) {
 function createProfile(username) {
   if (data.userProfiles[username]) return data.userProfiles[username];
 
+  // Use the ID that was already assigned in signup
   const profile = {
-    id: data.nextUserId,           // Use current ID (don't increment here)
+    id: data.nextUserId - 1,        // Important fix
     username,
     joinDate: new Date().toISOString(),
     lastOnline: new Date().toISOString(),
@@ -27,9 +28,12 @@ function createProfile(username) {
 
 function getProfileById(id) {
   id = Number(id);
+  if (!id) return null;
+
   const profile = Object.values(data.userProfiles).find(p => Number(p.id) === id);
   if (!profile) return null;
 
+  // Get latest username in case it changed
   const currentUsername = Object.keys(data.accounts).find(
     name => data.accounts[name].id === profile.id
   );

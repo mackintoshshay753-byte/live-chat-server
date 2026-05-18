@@ -57,7 +57,7 @@ function setupSockets(io) {
       }
     });
 
-    socket.on("signup", async ({ username, password }, cb) => {
+        socket.on("signup", async ({ username, password }, cb) => {
       try {
         const name = clean(username);
         const lowerName = name.toLowerCase();
@@ -82,7 +82,7 @@ function setupSockets(io) {
           theme: "light"
         };
 
-        createProfile(name);   // Now safe (doesn't increment again)
+        createProfile(name);
         saveData();
 
         safeCb(cb, { success: true, username: name, id });
