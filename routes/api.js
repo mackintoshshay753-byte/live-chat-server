@@ -38,6 +38,7 @@ router.get("/search/users", (req, res) => {
       if (username.toLowerCase().includes(keyword)) {
         const profile = data.userProfiles[username] || {};
 
+        // ✅ ACCURATE ONLINE STATUS — checks global online list
         const isOnline = onlineUsers.has(username);
 
         matches.push({
