@@ -1,8 +1,8 @@
 const express = require('express');
 const router = express.Router();
 
-// Import onlineUsers from sockets
-const { onlineUsers } = require('../sockets');
+const sockets = require('../sockets');
+const { onlineUsers } = sockets;           // Import onlineUsers
 const { getProfileById, clean } = require('../helpers');
 const { data } = require('../data');
 
@@ -10,9 +10,7 @@ const { data } = require('../data');
 router.get("/profile/:id", (req, res) => {
   try {
     const profile = getProfileById(req.params.id);
-    if (!profile) {
-      return res.status(404).json({ error: "User not found" });
-    }
+    if (!profile) return res.status(404).json({ error: "User not found" });
     res.json(profile);
   } catch (err) {
     console.error("Profile API Error:", err);
@@ -20,7 +18,7 @@ router.get("/profile/:id", (req, res) => {
   }
 });
 
-// ==================== SEARCH USERS (with Online Status) ====================
+// ==================== SEARCH USERS ====================
 router.get("/search/users", (req, res) => {
   try {
     let keyword = clean(req.query.keyword || "");
@@ -34,11 +32,14 @@ router.get("/search/users", (req, res) => {
     keyword = keyword.toLowerCase();
     const matches = [];
 
+    console.log(`[Search] Query: "${keyword}" | Currently online: ${onlineUsers.size}`);
+
     Object.entries(data.accounts).forEach(([username, info]) => {
       if (username.toLowerCase().includes(keyword)) {
         const profile = data.userProfiles[username] || {};
-
         const isOnline = onlineUsers.has(username);
+
+        console.log(`[Search] User: ${username} → Online: ${isOnline}`);
 
         matches.push({
           id: info.id,
@@ -56,12 +57,7 @@ router.get("/search/users", (req, res) => {
     const start = (page - 1) * limit;
     const results = matches.slice(start, start + limit);
 
-    res.json({ 
-      results, 
-      total, 
-      page, 
-      pages 
-    });
+    res.json({ results, total, page, pages });
   } catch (err) {
     console.error("Search API Error:", err);
     res.status(500).json({ error: "Server error" });
