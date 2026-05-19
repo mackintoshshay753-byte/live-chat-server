@@ -1,6 +1,3 @@
-// ======================
-// groupsapi.js
-// ======================
 const express = require('express');
 const router = express.Router();
 const multer = require('multer');
@@ -9,11 +6,10 @@ const fs = require('fs');
 
 const { data, saveData } = require('../data');
 
-// ======================
-// MULTER CONFIG - Group Icon Upload
-// ======================
+// ----------------------
+// IMAGE UPLOAD CONFIG
+// ----------------------
 const UPLOAD_FOLDER = path.join(__dirname, '../public/uploads/groups');
-
 if (!fs.existsSync(UPLOAD_FOLDER)) {
   fs.mkdirSync(UPLOAD_FOLDER, { recursive: true });
 }
@@ -24,7 +20,8 @@ const storage = multer.diskStorage({
   },
   filename: function (req, file, cb) {
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    cb(null, 'group-' + uniqueSuffix + path.extname(file.originalname));
+    const ext = path.extname(file.originalname);
+    cb(null, 'group-' + uniqueSuffix + ext);
   }
 });
 
@@ -33,73 +30,59 @@ const fileFilter = (req, file, cb) => {
   if (allowedTypes.includes(file.mimetype)) {
     cb(null, true);
   } else {
-    cb(new Error('Only JPG, PNG, GIF and WEBP images are allowed'), false);
+    cb(new Error('Only JPG, PNG, GIF, WEBP files are allowed'), false);
   }
 };
 
 const upload = multer({
   storage: storage,
   fileFilter: fileFilter,
-  limits: { fileSize: 5 * 1024 * 1024 } // 5MB limit
+  limits: { fileSize: 5 * 1024 * 1024 } // 5MB max
 });
 
-// ======================
-// CREATE GROUP
-// ======================
+// ----------------------
+// GROUPS
+// ----------------------
+
+// ✅ Create group — owner is added automatically as "owner" role
 router.post("/create", upload.single('groupIcon'), (req, res) => {
   try {
     const { name, description, createdBy, createdById } = req.body;
-
+    
     if (!name || name.trim().length < 3) {
       if (req.file) fs.unlinkSync(req.file.path);
-      return res.json({ success: false, error: "Group name must be at least 3 characters long." });
+      return res.json({ success: false, error: "Name too short" });
     }
 
-    if (!createdBy || !createdById) {
-      if (req.file) fs.unlinkSync(req.file.path);
-      return res.json({ success: false, error: "Creator information is missing." });
+    let iconUrl = "/uploads/groups/default-group.png";
+    if (req.file) {
+      iconUrl = "/uploads/groups/" + req.file.filename;
     }
-
-    const iconUrl = req.file 
-      ? `/uploads/groups/${req.file.filename}` 
-      : "/uploads/groups/default-group.png";
 
     const newGroup = {
       id: data.nextGroupId++,
       name: name.trim(),
       iconUrl: iconUrl,
       createdBy: createdBy,
-      createdById: Number(createdById),
+      createdById: createdById,
       description: description ? description.trim() : "",
       createdDate: new Date().toISOString(),
       members: [
-        {
-          userId: Number(createdById),
-          username: createdBy,
-          role: "owner"
-        }
+        { userId: Number(createdById), username: createdBy, role: "owner" } // creator = owner
       ]
     };
 
     data.groups.push(newGroup);
     saveData();
-
-    res.json({ 
-      success: true, 
-      message: "Group created successfully!",
-      groupId: newGroup.id 
-    });
-
+    res.json({ success: true, groupId: newGroup.id });
   } catch (err) {
     if (req.file) fs.unlinkSync(req.file.path);
     console.error("Create Group Error:", err);
-    res.status(500).json({ success: false, error: "Server error while creating group." });
+    res.json({ success: false, error: err.message || "Server error" });
   }
 });
 
-// ======================
-// GET SINGLE GROUP
-// ======================
+// ✅ Get single group + members
 router.get("/:id", (req, res) => {
   try {
     const groupId = Number(req.params.id);
@@ -116,28 +99,26 @@ router.get("/:id", (req, res) => {
   }
 });
 
-// ======================
-// JOIN GROUP
-// ======================
+// ✅ Join group endpoint — adds user as "member" role
 router.post("/:id/join", (req, res) => {
   try {
     const groupId = Number(req.params.id);
     const { userId, username } = req.body;
 
     if (!userId || !username) {
-      return res.json({ success: false, error: "User ID and username are required" });
+      return res.json({ success: false, error: "Missing user data" });
     }
 
     const group = data.groups.find(g => g.id === groupId);
-    if (!group) {
-      return res.json({ success: false, error: "Group not found" });
-    }
+    if (!group) return res.json({ success: false, error: "Group not found" });
 
+    // Check if already in group
     const alreadyMember = group.members.some(m => m.userId === Number(userId));
     if (alreadyMember) {
-      return res.json({ success: false, error: "You are already a member of this group" });
+      return res.json({ success: false, error: "Already a member" });
     }
 
+    // Add as member
     group.members.push({
       userId: Number(userId),
       username: username,
@@ -145,79 +126,10 @@ router.post("/:id/join", (req, res) => {
     });
 
     saveData();
-    res.json({ success: true, message: "Successfully joined the group!" });
-
+    res.json({ success: true, message: "Joined group" });
   } catch (err) {
     console.error("Join Group Error:", err);
-    res.status(500).json({ success: false, error: "Server error" });
-  }
-});
-
-// ======================
-// USER ADS ROUTES
-// ======================
-
-// Get all ads
-router.get("/userads", (req, res) => {
-  try {
-    if (!data.userAds) data.userAds = [];
-    res.json(data.userAds.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)));
-  } catch (err) {
-    console.error("Get User Ads Error:", err);
-    res.status(500).json({ error: "Failed to load ads" });
-  }
-});
-
-// Create new ad (Base64 image)
-router.post("/userads", (req, res) => {
-  try {
-    if (!data.userAds) data.userAds = [];
-
-    const { groupId, groupName, adName, image, size, createdBy, createdByName } = req.body;
-
-    if (!groupId || !adName || !image || !size || !createdBy) {
-      return res.status(400).json({ error: "Missing required fields" });
-    }
-
-    const newAd = {
-      id: Date.now().toString(),
-      createdAt: new Date().toISOString(),
-      groupId: Number(groupId),
-      groupName: groupName || "Unknown Group",
-      adName: adName.trim(),
-      image: image,           // Base64 data URL
-      size: size,             // "160x600" or "728x90"
-      createdBy: Number(createdBy),
-      createdByName: createdByName || "Anonymous"
-    };
-
-    data.userAds.unshift(newAd); // newest first
-    saveData();
-
-    res.status(201).json({ 
-      success: true, 
-      message: "Ad created successfully!",
-      ad: newAd 
-    });
-
-  } catch (err) {
-    console.error("Create User Ad Error:", err);
-    res.status(500).json({ error: "Failed to create advertisement" });
-  }
-});
-
-// Get ads by size (for sidebar)
-router.get("/userads/size/:size", (req, res) => {
-  try {
-    if (!data.userAds) return res.json([]);
-    
-    const size = req.params.size;
-    const filteredAds = data.userAds.filter(ad => ad.size === size);
-    
-    res.json(filteredAds);
-  } catch (err) {
-    console.error("Filter Ads Error:", err);
-    res.status(500).json({ error: "Failed to filter ads" });
+    res.json({ success: false, error: "Server error" });
   }
 });
 
