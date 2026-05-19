@@ -133,4 +133,66 @@ router.post("/:id/join", (req, res) => {
   }
 });
 
+// ==================================================
+// ✅ USER ADS — NOW INSIDE groupsapi.js
+// ==================================================
+
+// ✅ GET all ads
+router.get("/userads", (req, res) => {
+  try {
+    if (!data.userAds) data.userAds = [];
+    // newest first
+    res.json(data.userAds.sort((a,b) => new Date(b.createdAt) - new Date(a.createdAt)));
+  } catch (err) {
+    console.error("Load ads error:", err);
+    res.status(500).json({ error: "Failed to load ads" });
+  }
+});
+
+// ✅ CREATE new ad
+router.post("/userads", (req, res) => {
+  try {
+    if (!data.userAds) data.userAds = [];
+
+    const { groupId, groupName, adName, image, size, createdBy, createdByName } = req.body;
+
+    if (!groupId || !groupName || !adName || !image || !size || !createdBy) {
+      return res.status(400).json({ error: "Missing required fields" });
+    }
+
+    const newAd = {
+      id: Date.now().toString(),
+      createdAt: new Date().toISOString(),
+      groupId,
+      groupName,
+      adName,
+      image,
+      size, // "728x90" or "160x600"
+      createdBy,
+      createdByName
+    };
+
+    data.userAds.unshift(newAd);
+    saveData();
+
+    res.status(201).json(newAd);
+  } catch (err) {
+    console.error("Create ad error:", err);
+    res.status(500).json({ error: "Failed to create ad" });
+  }
+});
+
+// ✅ GET only ads of a specific size (for sidebar)
+router.get("/userads/size/:size", (req, res) => {
+  try {
+    if (!data.userAds) return res.json([]);
+    const size = req.params.size;
+    const filtered = data.userAds.filter(ad => ad.size === size);
+    res.json(filtered);
+  } catch (err) {
+    console.error("Filter ads error:", err);
+    res.status(500).json({ error: "Failed to filter ads" });
+  }
+});
+
 module.exports = router;
