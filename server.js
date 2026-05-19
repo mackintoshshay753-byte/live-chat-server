@@ -34,10 +34,12 @@ const apiRoutes = require('./routes/api');
 const friendsApiRoutes = require('./routes/friendsapi');
 const groupsApiRoutes = require('./routes/groupsapi');
 const pageRoutes = require('./routes/pages');
+const useradsApiRoutes = require('./routes/useradsapi'); // ✅ Added your new route here
 
 app.use('/api', apiRoutes);
 app.use('/api/friends', friendsApiRoutes);
 app.use('/api/groups', groupsApiRoutes);
+app.use('/api/userads', useradsApiRoutes); // ✅ Mount your new ads API
 app.use('/', pageRoutes);
 
 server.listen(PORT, () => console.log("✅ Server running on port", PORT));
