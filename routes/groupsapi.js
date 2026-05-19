@@ -182,4 +182,34 @@ router.post("/:id/update-description", (req, res) => {
   }
 });
 
+// ✅ Change Group Ownership
+router.post("/:id/change-owner", (req, res) => {
+  try {
+    const groupId = Number(req.params.id);
+    const { newOwnerId } = req.body;
+    const group = data.groups.find(g => g.id === groupId);
+
+    if (!group) return res.json({ success: false, error: "Group not found" });
+
+    // Check if new owner is actually a member
+    const newOwnerMember = group.members.find(m => m.userId === Number(newOwnerId));
+    if (!newOwnerMember) return res.json({ success: false, error: "User is not in this group" });
+
+    // Update ownership
+    group.createdById = Number(newOwnerId);
+    group.createdBy = newOwnerMember.username;
+
+    // Update roles: old owner → member, new owner → owner
+    group.members.forEach(m => {
+      if (m.userId === Number(newOwnerId)) m.role = "owner";
+      if (m.userId === group.createdById && m.userId !== Number(newOwnerId)) m.role = "member";
+    });
+
+    saveData();
+    res.json({ success: true });
+  } catch (err) {
+    res.json({ success: false, error: err.message || "Failed to change owner" });
+  }
+});
+
 module.exports = router;
