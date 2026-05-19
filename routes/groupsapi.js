@@ -133,4 +133,53 @@ router.post("/:id/join", (req, res) => {
   }
 });
 
+// ==============================================
+// ✅ NEW ENDPOINTS FOR CONFIGURE GROUP PAGE
+// ==============================================
+
+// ✅ Update Group Icon
+router.post("/:id/update-icon", upload.single('groupIcon'), (req, res) => {
+  try {
+    const groupId = Number(req.params.id);
+    const group = data.groups.find(g => g.id === groupId);
+    
+    if (!group) return res.json({ success: false, error: "Group not found" });
+    if (!req.file) return res.json({ success: false, error: "No image uploaded" });
+
+    // Delete old icon if it's not the default one
+    if (group.iconUrl && !group.iconUrl.includes("default-group.png")) {
+      const oldIconPath = path.join(__dirname, '../public', group.iconUrl);
+      if (fs.existsSync(oldIconPath)) fs.unlinkSync(oldIconPath);
+    }
+
+    // Save new icon URL
+    group.iconUrl = "/uploads/groups/" + req.file.filename;
+    saveData();
+
+    res.json({ success: true, newIconUrl: group.iconUrl });
+  } catch (err) {
+    if (req.file) fs.unlinkSync(req.file.path);
+    res.json({ success: false, error: err.message || "Failed to update icon" });
+  }
+});
+
+// ✅ Update Group Description
+router.post("/:id/update-description", (req, res) => {
+  try {
+    const groupId = Number(req.params.id);
+    const { description } = req.body;
+    const group = data.groups.find(g => g.id === groupId);
+
+    if (!group) return res.json({ success: false, error: "Group not found" });
+
+    // Update and trim to max 500 chars
+    group.description = description ? description.trim().slice(0, 500) : "";
+    saveData();
+
+    res.json({ success: true });
+  } catch (err) {
+    res.json({ success: false, error: err.message || "Failed to update description" });
+  }
+});
+
 module.exports = router;
