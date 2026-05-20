@@ -1,63 +1,51 @@
+const sanitizeHtml = require('sanitize-html');
 const { data, saveData } = require('../data');
 
-// ─── Input cleaning ───────────────────────────────────────────
-// Strips all HTML tags and trims whitespace.
-// sanitize-html is not needed here — usernames and bios are
-// stored as plain text and never rendered as HTML by the server.
 function clean(input) {
-  return String(input ?? '').replace(/<[^>]*>/g, '').trim();
+  return sanitizeHtml(String(input || '').trim(), { 
+    allowedTags: [], 
+    allowedAttributes: {} 
+  });
 }
 
-// ─── Create profile ───────────────────────────────────────────
-// Accepts the already-assigned ID explicitly — never infers it
-// from nextUserId, which is fragile if call order ever changes.
-function createProfile(username, id) {
+function createProfile(username) {
   if (data.userProfiles[username]) return data.userProfiles[username];
 
-  const now = new Date().toISOString();
+  // Use the ID that was already assigned in signup
   const profile = {
-    id,
+    id: data.nextUserId - 1,        // Important fix
     username,
-    joinDate:   now,
-    lastOnline: now,
-    theme:      'light',
-    bio:        '',
+    joinDate: new Date().toISOString(),
+    lastOnline: new Date().toISOString(),
+    theme: "light",
+    bio: "" // ✅ ADDED: empty bio by default for new users
   };
 
-  data.userProfiles[username]  = profile;
-  data.usernameToId[username]  = id;
+  data.userProfiles[username] = profile;
+  data.usernameToId[username] = profile.id;
   saveData();
   return profile;
 }
 
-// ─── Get profile by ID ────────────────────────────────────────
-// Uses the usernameToId reverse-index for O(1) lookup instead
-// of scanning all profiles on every call.
 function getProfileById(id) {
-  const numId = Number(id);
-  if (!numId) return null;
+  id = Number(id);
+  if (!id) return null;
 
-  // usernameToId maps username -> id; build a reverse lookup
-  const username = Object.keys(data.usernameToId).find(
-    name => data.usernameToId[name] === numId
-  );
-  if (!username) return null;
-
-  const profile = data.userProfiles[username];
+  const profile = Object.values(data.userProfiles).find(p => Number(p.id) === id);
   if (!profile) return null;
 
-  // Resolve the latest username via accounts in case of a rename
-  const currentUsername =
-    Object.keys(data.accounts).find(name => data.accounts[name].id === numId)
-    ?? profile.username;
+  // Get latest username in case it changed
+  const currentUsername = Object.keys(data.accounts).find(
+    name => data.accounts[name].id === profile.id
+  );
 
   return {
-    id:         profile.id,
-    username:   currentUsername,
-    joinDate:   profile.joinDate,
-    lastOnline: profile.lastOnline ?? null,
-    theme:      profile.theme,
-    bio:        profile.bio ?? '',
+    id: profile.id,
+    username: currentUsername || profile.username,
+    joinDate: profile.joinDate,
+    lastOnline: profile.lastOnline || null,
+    theme: profile.theme,
+    bio: profile.bio || "" // ✅ ADDED: return bio value
   };
 }
 

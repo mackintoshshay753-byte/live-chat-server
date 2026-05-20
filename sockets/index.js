@@ -87,10 +87,6 @@ function setupSockets(io) {
         };
 
         createProfile(name);
-        // ✅ Initialize empty bio for new users
-        if (data.userProfiles[name]) {
-          data.userProfiles[name].bio = "";
-        }
         saveData();
 
         safeCb(cb, { success: true, username: name, id });
@@ -143,7 +139,6 @@ function setupSockets(io) {
           delete data.userProfiles[cleanOld];
           oldProfile.username = cleanNew;
           data.userProfiles[cleanNew] = oldProfile;
-          // ✅ Bio is automatically kept here — no extra code needed
         }
 
         if (data.usernameToId[cleanOld]) {
@@ -190,25 +185,6 @@ function setupSockets(io) {
         safeCb(cb, { success: false, message: "Something went wrong" });
       }
     });
-
-    // ✅ NEW: SAVE Bio via Socket
-    socket.on("update bio", ({ username, bio }, cb) => {
-      try {
-        const name = clean(username);
-        if (!data.userProfiles[name])
-          return safeCb(cb, { success: false, message: "User not found" });
-
-        // Save bio (trimmed, max 500 chars)
-        data.userProfiles[name].bio = bio.trim().slice(0, 500);
-        saveData();
-
-        safeCb(cb, { success: true, message: "Bio updated" });
-      } catch (err) {
-        console.error("Update Bio Error:", err);
-        safeCb(cb, { success: false, message: "Failed to save bio" });
-      }
-    });
-
   });
 }
 
