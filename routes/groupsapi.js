@@ -8,20 +8,15 @@ const { data, saveData } = require('../data');
 const { clean }          = require('../helpers');
 
 // ─── Constants ────────────────────────────────────────────────
-const UPLOAD_FOLDER   = path.join(__dirname, '../public/uploads/groups');
-const DEFAULT_ICON    = '/uploads/groups/default-group.png';
-const MAX_FILE_BYTES  = 5 * 1024 * 1024;          // 5 MB
-const MAX_DESC_LEN    = 500;
-const MAX_NAME_LEN    = 50;
-
-// Allowed extensions AND their expected magic bytes (first 4 bytes)
-const ALLOWED_EXTS = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp']);
-const MAGIC: Record<string, Buffer> = {};  // see checkMagic() below
+const UPLOAD_FOLDER  = path.join(__dirname, '../public/uploads/groups');
+const DEFAULT_ICON   = '/uploads/groups/default-group.png';
+const MAX_FILE_BYTES = 5 * 1024 * 1024;
+const MAX_DESC_LEN   = 500;
+const MAX_NAME_LEN   = 50;
 
 if (!fs.existsSync(UPLOAD_FOLDER)) fs.mkdirSync(UPLOAD_FOLDER, { recursive: true });
 
 // ─── Magic-byte validation ────────────────────────────────────
-// Clients control Content-Type; we verify the actual file bytes.
 function checkMagic(filePath) {
   const buf = Buffer.alloc(12);
   const fd  = fs.openSync(filePath, 'r');
@@ -29,12 +24,11 @@ function checkMagic(filePath) {
   fs.closeSync(fd);
 
   const hex = buf.toString('hex');
-  // JPEG: ffd8ff  PNG: 89504e47  GIF: 47494638  WEBP: 52494646????57454250
   return (
-    hex.startsWith('ffd8ff')         ||   // JPEG
-    hex.startsWith('89504e47')       ||   // PNG
-    hex.startsWith('47494638')       ||   // GIF
-    (hex.startsWith('52494646') && buf.slice(8, 12).toString('ascii') === 'WEBP') // WEBP
+    hex.startsWith('ffd8ff')   ||
+    hex.startsWith('89504e47') ||
+    hex.startsWith('47494638') ||
+    (hex.startsWith('52494646') && buf.slice(8, 12).toString('ascii') === 'WEBP')
   );
 }
 
@@ -45,16 +39,12 @@ function safeUnlink(filePath) {
 }
 
 // ─── Auth middleware ──────────────────────────────────────────
-// Verifies the requesting user actually exists in accounts.
-// NOTE: this is lightweight identity confirmation, not a signed
-// session token. For stronger auth, issue JWTs on login and
-// verify them here instead.
 function requireUser(req, res, next) {
   const userId = Number(req.body.requestingUserId);
   if (!userId) return res.status(401).json({ error: 'Not authenticated' });
 
-  const account = Object.values(data.accounts).find(a => a.id === userId);
-  if (!account) return res.status(401).json({ error: 'Not authenticated' });
+  const exists = Object.values(data.accounts).some(a => a.id === userId);
+  if (!exists) return res.status(401).json({ error: 'Not authenticated' });
 
   req.authedUserId = userId;
   next();
@@ -64,7 +54,6 @@ function requireUser(req, res, next) {
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, UPLOAD_FOLDER),
   filename:    (_req, file, cb) => {
-    // Derive extension from mimetype — never trust originalname
     const mimeToExt = {
       'image/jpeg': '.jpg',
       'image/png':  '.png',
@@ -81,7 +70,7 @@ const upload = multer({
   storage,
   limits:     { fileSize: MAX_FILE_BYTES },
   fileFilter: (_req, file, cb) => {
-    if (['image/jpeg','image/png','image/gif','image/webp'].includes(file.mimetype)) {
+    if (['image/jpeg', 'image/png', 'image/gif', 'image/webp'].includes(file.mimetype)) {
       cb(null, true);
     } else {
       cb(new Error('Only JPG, PNG, GIF, WEBP files are allowed'), false);
@@ -105,30 +94,28 @@ function requireOwner(group, req, res) {
   return true;
 }
 
+// ─── Helper: resolve username from authed ID ─────────────────
+function resolveUsername(authedUserId) {
+  return Object.keys(data.accounts).find(k => data.accounts[k].id === authedUserId) ?? null;
+}
+
 // ─── POST /api/groups/create ──────────────────────────────────
 router.post('/create', requireUser, upload.single('groupIcon'), (req, res) => {
-  let uploadedPath = req.file?.path;
+  const uploadedPath = req.file?.path;
   try {
-    const { name, description } = req.body;
-    const cleanName = clean(name || '');
+    const cleanName = clean(req.body.name || '');
 
     if (cleanName.length < 3 || cleanName.length > MAX_NAME_LEN) {
       safeUnlink(uploadedPath);
       return res.status(400).json({ success: false, error: `Name must be 3–${MAX_NAME_LEN} characters` });
     }
 
-    // Validate magic bytes if a file was uploaded
     if (req.file && !checkMagic(req.file.path)) {
       safeUnlink(uploadedPath);
       return res.status(400).json({ success: false, error: 'Invalid image file' });
     }
 
-    // Resolve creator from authed ID — never trust body fields for identity
-    const creatorAccount = Object.values(data.accounts).find(a => a.id === req.authedUserId);
-    const creatorUsername = Object.keys(data.accounts).find(
-      k => data.accounts[k].id === req.authedUserId
-    );
-
+    const creatorUsername = resolveUsername(req.authedUserId);
     const iconUrl = req.file ? `/uploads/groups/${req.file.filename}` : DEFAULT_ICON;
 
     const newGroup = {
@@ -137,9 +124,9 @@ router.post('/create', requireUser, upload.single('groupIcon'), (req, res) => {
       iconUrl,
       createdBy:   creatorUsername,
       createdById: req.authedUserId,
-      description: clean(description || '').slice(0, MAX_DESC_LEN),
+      description: clean(req.body.description || '').slice(0, MAX_DESC_LEN),
       createdDate: new Date().toISOString(),
-      members: [{ userId: req.authedUserId, username: creatorUsername, role: 'owner' }],
+      members:     [{ userId: req.authedUserId, username: creatorUsername, role: 'owner' }],
     };
 
     data.groups.push(newGroup);
@@ -173,10 +160,7 @@ router.post('/:id/join', requireUser, (req, res) => {
     const alreadyMember = group.members.some(m => m.userId === req.authedUserId);
     if (alreadyMember) return res.status(409).json({ success: false, error: 'Already a member' });
 
-    const username = Object.keys(data.accounts).find(
-      k => data.accounts[k].id === req.authedUserId
-    );
-
+    const username = resolveUsername(req.authedUserId);
     group.members.push({ userId: req.authedUserId, username, role: 'member' });
     saveData();
     res.json({ success: true, message: 'Joined group' });
@@ -188,11 +172,11 @@ router.post('/:id/join', requireUser, (req, res) => {
 
 // ─── POST /api/groups/:id/update-icon ────────────────────────
 router.post('/:id/update-icon', requireUser, upload.single('groupIcon'), (req, res) => {
-  let uploadedPath = req.file?.path;
+  const uploadedPath = req.file?.path;
   try {
     const group = findGroup(req.params.id, res);
-    if (!group) { safeUnlink(uploadedPath); return; }
-    if (!requireOwner(group, req, res)) { safeUnlink(uploadedPath); return; }
+    if (!group)                          { safeUnlink(uploadedPath); return; }
+    if (!requireOwner(group, req, res))  { safeUnlink(uploadedPath); return; }
     if (!req.file) return res.status(400).json({ success: false, error: 'No image uploaded' });
 
     if (!checkMagic(req.file.path)) {
@@ -200,7 +184,6 @@ router.post('/:id/update-icon', requireUser, upload.single('groupIcon'), (req, r
       return res.status(400).json({ success: false, error: 'Invalid image file' });
     }
 
-    // Delete old icon
     if (group.iconUrl && !group.iconUrl.includes('default-group.png')) {
       safeUnlink(path.join(__dirname, '../public', group.iconUrl));
     }
@@ -246,13 +229,10 @@ router.post('/:id/change-owner', requireUser, (req, res) => {
     if (!newOwnerMember)
       return res.status(400).json({ success: false, error: 'User is not in this group' });
 
-    // ✅ Capture old owner ID BEFORE mutating createdById
-    const oldOwnerId = group.createdById;
-
+    const oldOwnerId  = group.createdById;
     group.createdById = newOwnerId;
     group.createdBy   = newOwnerMember.username;
 
-    // Update roles using the captured old ID
     group.members.forEach(m => {
       if (m.userId === oldOwnerId) m.role = 'member';
       if (m.userId === newOwnerId) m.role = 'owner';
