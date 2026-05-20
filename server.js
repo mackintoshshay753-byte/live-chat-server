@@ -1,45 +1,57 @@
 const express = require('express');
-const http = require('http');
+const http    = require('http');
 const { Server } = require('socket.io');
-const cors = require('cors');
-const path = require('path');
+const cors   = require('cors');
+const path   = require('path');
+const helmet = require('helmet');
 
-const app = express();
+const app    = express();
 const server = http.createServer(app);
 
-const PORT = 3000;
-const ALLOWED_ORIGINS = ["https://idontknowww.neocities.org"];
+const PORT            = process.env.PORT || 3000;
+const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS
+  ? process.env.ALLOWED_ORIGINS.split(',')
+  : ["https://idontknowww.neocities.org"];
 
-app.use(cors({
-  origin: ALLOWED_ORIGINS,
-  credentials: true
-}));
+// ─── Security headers ─────────────────────────────────────────
+app.use(helmet());
+
+// ─── CORS ─────────────────────────────────────────────────────
+const corsOptions = { origin: ALLOWED_ORIGINS, credentials: true };
+app.use(cors(corsOptions));
+
+// ─── Body parsing ─────────────────────────────────────────────
 app.use(express.json({ limit: '10kb' }));
+
+// ─── Static files ─────────────────────────────────────────────
 app.use(express.static(path.join(__dirname, 'public')));
 
+// ─── Socket.IO ────────────────────────────────────────────────
 const io = new Server(server, {
-  cors: { origin: ALLOWED_ORIGINS, credentials: true }
+  cors: corsOptions,
+  maxHttpBufferSize: 64 * 1024, // 64 KB max per socket message (default is 1 MB)
 });
 
-// Load data
+// ─── Data & sockets ───────────────────────────────────────────
 const { loadData } = require('./data');
 loadData();
 
-// Setup sockets
 const setupSockets = require('./sockets');
 setupSockets(io);
 
-// Load routes
-const apiRoutes = require('./routes/api');
-const friendsApiRoutes = require('./routes/friendsapi');
-const groupsApiRoutes = require('./routes/groupsapi');
-const gamesApiRoutes = require('./routes/gamesapi'); // ✅ Your new file
-const pageRoutes = require('./routes/pages');
+// ─── Routes ───────────────────────────────────────────────────
+app.use('/api',          require('./routes/api'));
+app.use('/api/friends',  require('./routes/friendsapi'));
+app.use('/api/groups',   require('./routes/groupsapi'));
+app.use('/',             require('./routes/pages'));
 
-app.use('/api', apiRoutes);
-app.use('/api/friends', friendsApiRoutes);
-app.use('/api/groups', groupsApiRoutes);
-app.use('/api/games', gamesApiRoutes); // ✅ Now points to /routes/gamesapi.js
-app.use('/', pageRoutes);
+// ─── 404 handler (must be after all routes) ───────────────────
+app.use((_req, res) => res.status(404).json({ error: 'Not found' }));
 
-server.listen(PORT, () => console.log("✅ Server running on port", PORT));
+// ─── Unhandled error handler ──────────────────────────────────
+app.use((err, _req, res, _next) => {
+  console.error('Unhandled error:', err);
+  res.status(500).json({ error: 'Internal server error' });
+});
+
+server.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
