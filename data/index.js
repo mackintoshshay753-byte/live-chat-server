@@ -13,7 +13,10 @@ const DEFAULT_DATA = {
   friendRequests: {}, // ✅ NEW — stores pending requests
   friends: {},        // ✅ NEW — stores confirmed friends
   groups: [],         // ✅ ADDED — stores all groups
-  nextGroupId: 1      // ✅ ADDED — auto-increment group IDs
+  nextGroupId: 1,     // ✅ ADDED — auto-increment group IDs
+  // ✅ ADDED FOR GAMES — matches your API perfectly
+  games: [],          // Stores all created games
+  nextGameId: 1       // Auto-increment game IDs
 };
 
 let data = { ...DEFAULT_DATA };
@@ -30,6 +33,7 @@ function loadData() {
   try {
     const raw = fs.readFileSync(DATA_PATH, 'utf8');
     const loaded = JSON.parse(raw);
+    // Preserve all existing data + merge new defaults
     data = { ...DEFAULT_DATA, ...loaded };
     console.log("✅ Data loaded — ID 1 & all users preserved");
   } catch (err) {

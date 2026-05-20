@@ -33,11 +33,13 @@ setupSockets(io);
 const apiRoutes = require('./routes/api');
 const friendsApiRoutes = require('./routes/friendsapi');
 const groupsApiRoutes = require('./routes/groupsapi');
+const gamesApiRoutes = require('./routes/gamesapi'); // ✅ Your new file
 const pageRoutes = require('./routes/pages');
 
 app.use('/api', apiRoutes);
 app.use('/api/friends', friendsApiRoutes);
 app.use('/api/groups', groupsApiRoutes);
+app.use('/api/games', gamesApiRoutes); // ✅ Now points to /routes/gamesapi.js
 app.use('/', pageRoutes);
 
 server.listen(PORT, () => console.log("✅ Server running on port", PORT));
