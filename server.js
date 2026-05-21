@@ -3,6 +3,8 @@ const http = require('http');
 const { Server } = require('socket.io');
 const cors = require('cors');
 const path = require('path');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 
 const app = express();
 const server = http.createServer(app);
@@ -10,13 +12,37 @@ const server = http.createServer(app);
 const PORT = 3000;
 const ALLOWED_ORIGINS = ["https://idontknowww.neocities.org"];
 
+// Security headers
+app.use(helmet({
+  contentSecurityPolicy: false // disable CSP because Neocities blocks inline CSP
+}));
+
+// Basic rate limiting (prevents spam / DDoS)
+app.use(rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 300,
+  standardHeaders: true,
+  legacyHeaders: false
+}));
+
+// CORS
 app.use(cors({
   origin: ALLOWED_ORIGINS,
-  credentials: true
+  credentials: true,
+  methods: ["GET", "POST"]
 }));
-app.use(express.json({ limit: '10kb' }));
-app.use(express.static(path.join(__dirname, 'public')));
 
+// Body parser
+app.use(express.json({ limit: '10kb' }));
+
+// Static files
+app.use(express.static(path.join(__dirname, 'public'), {
+  etag: true,
+  maxAge: '1h',
+  immutable: true
+}));
+
+// Socket.io
 const io = new Server(server, {
   cors: { origin: ALLOWED_ORIGINS, credentials: true }
 });
@@ -25,19 +51,14 @@ const io = new Server(server, {
 const { loadData } = require('./data');
 loadData();
 
-// Setup sockets
+// Sockets
 const setupSockets = require('./sockets');
 setupSockets(io);
 
-// Load routes
-const apiRoutes = require('./routes/api');
-const friendsApiRoutes = require('./routes/friendsapi');
-const groupsApiRoutes = require('./routes/groupsapi');
-const pageRoutes = require('./routes/pages');
-
-app.use('/api', apiRoutes);
-app.use('/api/friends', friendsApiRoutes);
-app.use('/api/groups', groupsApiRoutes);
-app.use('/', pageRoutes);
+// Routes
+app.use('/api', require('./routes/api'));
+app.use('/api/friends', require('./routes/friendsapi'));
+app.use('/api/groups', require('./routes/groupsapi'));
+app.use('/', require('./routes/pages'));
 
 server.listen(PORT, () => console.log("✅ Server running on port", PORT));
