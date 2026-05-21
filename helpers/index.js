@@ -8,17 +8,17 @@ function clean(input) {
   });
 }
 
-// ✅ FIXED: Explicitly pass the precise user ID assigned during signup
-function createProfile(username, userId) {
+function createProfile(username) {
   if (data.userProfiles[username]) return data.userProfiles[username];
 
+  // Use the ID that was already assigned in signup
   const profile = {
-    id: Number(userId),
+    id: data.nextUserId - 1,        // Important fix
     username,
     joinDate: new Date().toISOString(),
     lastOnline: new Date().toISOString(),
     theme: "light",
-    bio: "" 
+    bio: "" // ✅ ADDED: empty bio by default for new users
   };
 
   data.userProfiles[username] = profile;
@@ -34,6 +34,7 @@ function getProfileById(id) {
   const profile = Object.values(data.userProfiles).find(p => Number(p.id) === id);
   if (!profile) return null;
 
+  // Get latest username in case it changed
   const currentUsername = Object.keys(data.accounts).find(
     name => data.accounts[name].id === profile.id
   );
@@ -44,32 +45,8 @@ function getProfileById(id) {
     joinDate: profile.joinDate,
     lastOnline: profile.lastOnline || null,
     theme: profile.theme,
-    bio: profile.bio || ""
+    bio: profile.bio || "" // ✅ ADDED: return bio value
   };
 }
 
-// ✅ NEW: Middleware validating API requests against active sessions
-function authenticateToken(req, res, next) {
-  const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1]; // Expecting "Bearer <token>"
-
-  if (!token || !data.sessions[token]) {
-    return res.status(401).json({ error: "Unauthorized access. Please log in again." });
-  }
-
-  const username = data.sessions[token];
-  const account = data.accounts[username];
-
-  if (!account) {
-    return res.status(401).json({ error: "Account no longer exists." });
-  }
-
-  // Bind authenticated user data securely to the request lifecycle
-  req.user = {
-    username: username,
-    id: account.id
-  };
-  next();
-}
-
-module.exports = { clean, createProfile, getProfileById, authenticateToken };
+module.exports = { clean, createProfile, getProfileById };

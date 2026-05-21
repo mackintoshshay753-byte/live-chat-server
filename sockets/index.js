@@ -1,32 +1,34 @@
 const bcrypt = require('bcrypt');
-const crypto = require('crypto'); // ✅ Built-in token generator
 const { data, saveData } = require('../data');
 const { clean, createProfile } = require('../helpers');
 
+// ✅ This MUST be declared BEFORE exports
 const onlineUsers = new Map(); // username -> socket.id
 
 function setupSockets(io) {
   io.on("connection", (socket) => {
     console.log("🔌 User connected");
 
-    // ==================== SESSION JOIN ====================
-    // ✅ SECURE: Users identify via their secret session token rather than arbitrary text
-    socket.on("join", (token) => {
-      if (!token || !data.sessions[token]) return;
-      
-      const username = data.sessions[token];
-      onlineUsers.set(username, socket.id);
+    // ==================== LAST ONLINE ====================
+    socket.on("join", (username) => {
+      const cleanName = clean(username);
+      if (!cleanName) return;
 
-      if (data.userProfiles[username]) {
-        data.userProfiles[username].lastOnline = new Date().toISOString();
+      // ✅ Add user to online list
+      onlineUsers.set(cleanName, socket.id);
+
+      // Update last seen time
+      if (data.userProfiles[cleanName]) {
+        data.userProfiles[cleanName].lastOnline = new Date().toISOString();
         saveData();
       }
-      console.log(`👤 ${username} is online | Total online: ${onlineUsers.size}`);
+      console.log(`👤 ${cleanName} is online | Total online: ${onlineUsers.size}`);
     });
 
     socket.on("disconnect", () => {
       for (const [username, id] of onlineUsers.entries()) {
         if (id === socket.id) {
+          // ✅ Remove from online list
           if (data.userProfiles[username]) {
             data.userProfiles[username].lastOnline = new Date().toISOString();
             saveData();
@@ -42,21 +44,17 @@ function setupSockets(io) {
     socket.on("login", async ({ username, password }, cb) => {
       try {
         const name = clean(username);
+        const lowerName = name.toLowerCase();
         const account = data.accounts[name];
 
-        if (!account)
+        if (!account || !data.registeredNames[lowerName])
           return safeCb(cb, { success: false, message: "Account not found" });
 
         const validPassword = await bcrypt.compare(password, account.hash);
         if (!validPassword)
           return safeCb(cb, { success: false, message: "Incorrect password" });
 
-        // ✅ Secure Token Generation
-        const token = crypto.randomBytes(32).toString('hex');
-        data.sessions[token] = name;
-        saveData();
-
-        safeCb(cb, { success: true, token, username: name, id: account.id, theme: account.theme });
+        safeCb(cb, { success: true, username: name, id: account.id, theme: account.theme });
       } catch (err) {
         console.error("Login Error:", err);
         safeCb(cb, { success: false, message: "Server error — try again" });
@@ -88,30 +86,17 @@ function setupSockets(io) {
           theme: "light"
         };
 
-        createProfile(name, id); // ✅ Fixed profile sync
-        
-        // ✅ Automatically log them in by generating an active token
-        const token = crypto.randomBytes(32).toString('hex');
-        data.sessions[token] = name;
+        createProfile(name);
         saveData();
 
-        safeCb(cb, { success: true, token, username: name, id });
+        safeCb(cb, { success: true, username: name, id });
       } catch (err) {
         console.error("Signup Error:", err);
         safeCb(cb, { success: false, message: "Server error — try again" });
       }
     });
 
-    // ==================== PROFILE CONTROL & LOGOUT ====================
-    socket.on("logout", (token) => {
-      if (token && data.sessions[token]) {
-        const username = data.sessions[token];
-        onlineUsers.delete(username);
-        delete data.sessions[token];
-        saveData();
-      }
-    });
-
+    // ==================== OTHER HANDLERS ====================
     socket.on("save-theme", ({ theme, username }) => {
       try {
         const account = data.accounts[username];
@@ -161,11 +146,7 @@ function setupSockets(io) {
           delete data.usernameToId[cleanOld];
         }
 
-        // Keep active sessions mapped accurately to the updated name
-        for (const [token, user] of Object.entries(data.sessions)) {
-          if (user === cleanOld) data.sessions[token] = cleanNew;
-        }
-
+        // ✅ Update online status to new name
         if (onlineUsers.has(cleanOld)) {
           onlineUsers.set(cleanNew, onlineUsers.get(cleanOld));
           onlineUsers.delete(cleanOld);
@@ -190,7 +171,7 @@ function setupSockets(io) {
 
         const sameAsOld = await bcrypt.compare(newPassword, account.hash);
         if (sameAsOld)
-          return safeCb(cb, { success: false, message: "Password cannot be identical to current password" });
+          return safeCb(cb, { success: false, message: "Password cannot be the same as it already is" });
 
         if (newPassword.length < 8)
           return safeCb(cb, { success: false, message: "Password must be at least 8 characters" });
@@ -211,5 +192,6 @@ function safeCb(cb, data) {
   if (typeof cb === "function") cb(data);
 }
 
+// ==================== ✅ FIXED EXPORTS ====================
 module.exports = setupSockets;
 module.exports.onlineUsers = onlineUsers;

@@ -21,12 +21,15 @@ const io = new Server(server, {
   cors: { origin: ALLOWED_ORIGINS, credentials: true }
 });
 
+// Load data
 const { loadData } = require('./data');
 loadData();
 
+// Setup sockets
 const setupSockets = require('./sockets');
 setupSockets(io);
 
+// Load routes
 const apiRoutes = require('./routes/api');
 const friendsApiRoutes = require('./routes/friendsapi');
 const groupsApiRoutes = require('./routes/groupsapi');
@@ -37,4 +40,4 @@ app.use('/api/friends', friendsApiRoutes);
 app.use('/api/groups', groupsApiRoutes);
 app.use('/', pageRoutes);
 
-server.listen(PORT, () => console.log("✅ Server running safely on port", PORT));
+server.listen(PORT, () => console.log("✅ Server running on port", PORT));
