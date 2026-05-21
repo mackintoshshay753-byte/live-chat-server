@@ -1,16 +1,15 @@
 const bcrypt = require("bcrypt");
+
 const rateLimitMap = new Map();
 
 const { data, saveData } = require("../data");
 const { clean, createProfile } = require("../helpers");
 
-const onlineUsers = new Map(); // username -> socket.id
+const onlineUsers = new Map();
 
 const BCRYPT_ROUNDS = 12;
 const MAX_LOGIN_ATTEMPTS = 5;
-const LOGIN_TIMEOUT = 1000 * 60 * 10; // 10 mins
-
-// ==================== HELPERS ====================
+const LOGIN_TIMEOUT = 1000 * 60 * 10;
 
 function safeCb(cb, payload) {
   try {
@@ -34,11 +33,7 @@ function isRateLimited(ip) {
 
   const entry = rateLimitMap.get(ip);
 
-  if (entry.timeoutUntil > now) {
-    return true;
-  }
-
-  return false;
+  return entry.timeoutUntil > now;
 }
 
 function addFailedAttempt(ip) {
@@ -93,40 +88,92 @@ function validatePassword(password) {
   return null;
 }
 
-// ==================== SOCKET SETUP ====================
-
 function setupSockets(io) {
   io.on("connection", (socket) => {
+
     console.log("🔌 User connected");
 
     const ip =
       socket.handshake.headers["x-forwarded-for"] ||
       socket.handshake.address;
 
-    // ==================== JOIN ====================
-
-    socket.on("join", (username) => {
+    socket.on("restore session", ({ username }, cb) => {
       try {
+
         const cleanName = clean(username);
 
-        if (!cleanName) return;
+        if (!cleanName) {
+          return safeCb(cb, {
+            success: false,
+            message: "Invalid username"
+          });
+        }
 
-        // Disconnect previous session
+        const account = data.accounts[cleanName];
+
+        if (!account) {
+          return safeCb(cb, {
+            success: false,
+            message: "Account not found"
+          });
+        }
+
         const existingSocketId = onlineUsers.get(cleanName);
 
         if (existingSocketId && existingSocketId !== socket.id) {
-          const oldSocket = io.sockets.sockets.get(existingSocketId);
+
+          const oldSocket =
+            io.sockets.sockets.get(existingSocketId);
 
           if (oldSocket) {
             oldSocket.disconnect(true);
           }
         }
 
+        socket.authenticated = true;
+        socket.username = cleanName;
+
+        onlineUsers.set(cleanName, socket.id);
+
+        if (data.userProfiles[cleanName]) {
+
+          data.userProfiles[cleanName].lastOnline =
+            new Date().toISOString();
+
+          saveData();
+        }
+
+        safeCb(cb, {
+          success: true,
+          username: cleanName,
+          id: account.id,
+          theme: account.theme || "light"
+        });
+
+      } catch (err) {
+
+        console.error("Restore Session Error:", err);
+
+        safeCb(cb, {
+          success: false,
+          message: "Server error"
+        });
+      }
+    });
+
+    socket.on("join", (username) => {
+      try {
+
+        const cleanName = clean(username);
+
+        if (!cleanName) return;
+
         onlineUsers.set(cleanName, socket.id);
 
         socket.username = cleanName;
 
         if (data.userProfiles[cleanName]) {
+
           data.userProfiles[cleanName].lastOnline =
             new Date().toISOString();
 
@@ -136,20 +183,22 @@ function setupSockets(io) {
         console.log(
           `👤 ${cleanName} online | Total: ${onlineUsers.size}`
         );
+
       } catch (err) {
+
         console.error("Join Error:", err);
       }
     });
 
-    // ==================== DISCONNECT ====================
-
     socket.on("disconnect", () => {
       try {
+
         const username = socket.username;
 
         if (!username) return;
 
         if (data.userProfiles[username]) {
+
           data.userProfiles[username].lastOnline =
             new Date().toISOString();
 
@@ -161,15 +210,16 @@ function setupSockets(io) {
         console.log(
           `👤 ${username} offline | Total: ${onlineUsers.size}`
         );
+
       } catch (err) {
+
         console.error("Disconnect Error:", err);
       }
     });
 
-    // ==================== LOGIN ====================
-
     socket.on("login", async ({ username, password }, cb) => {
       try {
+
         if (isRateLimited(ip)) {
           return safeCb(cb, {
             success: false,
@@ -189,6 +239,7 @@ function setupSockets(io) {
         const lowerName = name.toLowerCase();
 
         if (!data.registeredNames[lowerName]) {
+
           addFailedAttempt(ip);
 
           return safeCb(cb, {
@@ -200,6 +251,7 @@ function setupSockets(io) {
         const account = data.accounts[name];
 
         if (!account) {
+
           addFailedAttempt(ip);
 
           return safeCb(cb, {
@@ -214,6 +266,7 @@ function setupSockets(io) {
         );
 
         if (!validPassword) {
+
           addFailedAttempt(ip);
 
           return safeCb(cb, {
@@ -227,13 +280,17 @@ function setupSockets(io) {
         socket.authenticated = true;
         socket.username = name;
 
+        onlineUsers.set(name, socket.id);
+
         safeCb(cb, {
           success: true,
           username: name,
           id: account.id,
           theme: account.theme || "light"
         });
+
       } catch (err) {
+
         console.error("Login Error:", err);
 
         safeCb(cb, {
@@ -243,10 +300,9 @@ function setupSockets(io) {
       }
     });
 
-    // ==================== SIGNUP ====================
-
     socket.on("signup", async ({ username, password }, cb) => {
       try {
+
         if (isRateLimited(ip)) {
           return safeCb(cb, {
             success: false,
@@ -257,6 +313,7 @@ function setupSockets(io) {
         const name = clean(username);
 
         const usernameError = validateUsername(name);
+
         if (usernameError) {
           return safeCb(cb, {
             success: false,
@@ -264,7 +321,9 @@ function setupSockets(io) {
           });
         }
 
-        const passwordError = validatePassword(password);
+        const passwordError =
+          validatePassword(password);
+
         if (passwordError) {
           return safeCb(cb, {
             success: false,
@@ -287,7 +346,10 @@ function setupSockets(io) {
 
         data.accounts[name] = {
           id,
-          hash: await bcrypt.hash(password, BCRYPT_ROUNDS),
+          hash: await bcrypt.hash(
+            password,
+            BCRYPT_ROUNDS
+          ),
           joinDate: new Date().toISOString(),
           theme: "light"
         };
@@ -301,7 +363,9 @@ function setupSockets(io) {
           username: name,
           id
         });
+
       } catch (err) {
+
         console.error("Signup Error:", err);
 
         safeCb(cb, {
@@ -311,10 +375,9 @@ function setupSockets(io) {
       }
     });
 
-    // ==================== SAVE THEME ====================
-
     socket.on("save-theme", ({ theme }, cb) => {
       try {
+
         if (!socket.authenticated) {
           return safeCb(cb, {
             success: false,
@@ -333,7 +396,12 @@ function setupSockets(io) {
 
         const account = data.accounts[username];
 
-        if (!account) return;
+        if (!account) {
+          return safeCb(cb, {
+            success: false,
+            message: "Account not found"
+          });
+        }
 
         account.theme = theme;
 
@@ -343,103 +411,118 @@ function setupSockets(io) {
 
         saveData();
 
-        safeCb(cb, { success: true });
+        safeCb(cb, {
+          success: true
+        });
+
       } catch (err) {
+
         console.error("Save Theme Error:", err);
+
+        safeCb(cb, {
+          success: false,
+          message: "Server error"
+        });
       }
     });
 
-    // ==================== CHANGE USERNAME ====================
+    socket.on("change username", ({ newName }, cb) => {
+      try {
 
-    socket.on(
-      "change username",
-      ({ newName }, cb) => {
-        try {
-          if (!socket.authenticated) {
-            return safeCb(cb, {
-              success: false,
-              message: "Unauthorized"
-            });
-          }
-
-          const oldName = socket.username;
-
-          const cleanNew = clean(newName);
-
-          const validation = validateUsername(cleanNew);
-
-          if (validation) {
-            return safeCb(cb, {
-              success: false,
-              message: validation
-            });
-          }
-
-          const oldLower = oldName.toLowerCase();
-          const newLower = cleanNew.toLowerCase();
-
-          if (oldLower === newLower) {
-            return safeCb(cb, {
-              success: false,
-              message: "Same username"
-            });
-          }
-
-          if (data.registeredNames[newLower]) {
-            return safeCb(cb, {
-              success: false,
-              message: "Username taken"
-            });
-          }
-
-          const accountData = data.accounts[oldName];
-
-          delete data.accounts[oldName];
-          data.accounts[cleanNew] = accountData;
-
-          delete data.registeredNames[oldLower];
-          data.registeredNames[newLower] = true;
-
-          if (data.userProfiles[oldName]) {
-            data.userProfiles[cleanNew] =
-              data.userProfiles[oldName];
-
-            delete data.userProfiles[oldName];
-          }
-
-          onlineUsers.delete(oldName);
-          onlineUsers.set(cleanNew, socket.id);
-
-          socket.username = cleanNew;
-
-          saveData();
-
-          io.emit("username updated", {
-            oldName,
-            newName: cleanNew
-          });
-
-          safeCb(cb, {
-            success: true,
-            newName: cleanNew
-          });
-        } catch (err) {
-          console.error("Change Username Error:", err);
-
-          safeCb(cb, {
+        if (!socket.authenticated) {
+          return safeCb(cb, {
             success: false,
-            message: "Server error"
+            message: "Unauthorized"
           });
         }
-      }
-    );
 
-    // ==================== CHANGE PASSWORD ====================
+        const oldName = socket.username;
+
+        const cleanNew = clean(newName);
+
+        const validation =
+          validateUsername(cleanNew);
+
+        if (validation) {
+          return safeCb(cb, {
+            success: false,
+            message: validation
+          });
+        }
+
+        const oldLower = oldName.toLowerCase();
+        const newLower = cleanNew.toLowerCase();
+
+        if (oldLower === newLower) {
+          return safeCb(cb, {
+            success: false,
+            message: "Same username"
+          });
+        }
+
+        if (data.registeredNames[newLower]) {
+          return safeCb(cb, {
+            success: false,
+            message: "Username taken"
+          });
+        }
+
+        const accountData =
+          data.accounts[oldName];
+
+        delete data.accounts[oldName];
+
+        data.accounts[cleanNew] = accountData;
+
+        delete data.registeredNames[oldLower];
+
+        data.registeredNames[newLower] = true;
+
+        if (data.userProfiles[oldName]) {
+
+          data.userProfiles[cleanNew] =
+            data.userProfiles[oldName];
+
+          delete data.userProfiles[oldName];
+        }
+
+        onlineUsers.delete(oldName);
+
+        onlineUsers.set(cleanNew, socket.id);
+
+        socket.username = cleanNew;
+
+        saveData();
+
+        io.emit("username updated", {
+          oldName,
+          newName: cleanNew
+        });
+
+        safeCb(cb, {
+          success: true,
+          newName: cleanNew
+        });
+
+      } catch (err) {
+
+        console.error(
+          "Change Username Error:",
+          err
+        );
+
+        safeCb(cb, {
+          success: false,
+          message: "Server error"
+        });
+      }
+    });
 
     socket.on(
       "change password",
       async ({ oldPassword, newPassword }, cb) => {
         try {
+
           if (!socket.authenticated) {
             return safeCb(cb, {
               success: false,
@@ -455,6 +538,13 @@ function setupSockets(io) {
             return safeCb(cb, {
               success: false,
               message: "Account not found"
+            });
+          }
+
+          if (typeof oldPassword !== "string") {
+            return safeCb(cb, {
+              success: false,
+              message: "Current password required"
             });
           }
 
@@ -480,10 +570,11 @@ function setupSockets(io) {
             });
           }
 
-          const sameAsOld = await bcrypt.compare(
-            newPassword,
-            account.hash
-          );
+          const sameAsOld =
+            await bcrypt.compare(
+              newPassword,
+              account.hash
+            );
 
           if (sameAsOld) {
             return safeCb(cb, {
@@ -503,8 +594,13 @@ function setupSockets(io) {
             success: true,
             message: "Password updated"
           });
+
         } catch (err) {
-          console.error("Password Change Error:", err);
+
+          console.error(
+            "Password Change Error:",
+            err
+          );
 
           safeCb(cb, {
             success: false,
