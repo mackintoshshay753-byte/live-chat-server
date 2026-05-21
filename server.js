@@ -91,6 +91,7 @@ const { loadData } = require('./data');
     app.use('/api', require('./routes/api'));
     app.use('/api/friends', require('./routes/friendsapi'));
     app.use('/api/groups', require('./routes/groupsapi'));
+    app.use('/api/messages', require('./routes/messagesapi'));
     app.use('/', require('./routes/pages'));
 
     /* ---------------- START SERVER ---------------- */
