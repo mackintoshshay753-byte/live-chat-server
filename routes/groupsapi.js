@@ -5,70 +5,62 @@ const path = require('path');
 const fs = require('fs');
 
 const { data, saveData } = require('../data');
+const { clean, authenticateToken } = require('../helpers');
 
-// ----------------------
-// IMAGE UPLOAD CONFIG
-// ----------------------
 const UPLOAD_FOLDER = path.join(__dirname, '../public/uploads/groups');
 if (!fs.existsSync(UPLOAD_FOLDER)) {
   fs.mkdirSync(UPLOAD_FOLDER, { recursive: true });
 }
 
 const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    cb(null, UPLOAD_FOLDER);
-  },
-  filename: function (req, file, cb) {
+  destination: (req, file, cb) => cb(null, UPLOAD_FOLDER),
+  filename: (req, file, cb) => {
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    const ext = path.extname(file.originalname);
-    cb(null, 'group-' + uniqueSuffix + ext);
+    cb(null, 'group-' + uniqueSuffix + path.extname(file.originalname));
   }
 });
 
 const fileFilter = (req, file, cb) => {
   const allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
-  if (allowedTypes.includes(file.mimetype)) {
-    cb(null, true);
-  } else {
-    cb(new Error('Only JPG, PNG, GIF, WEBP files are allowed'), false);
-  }
+  if (allowedTypes.includes(file.mimetype)) cb(null, true);
+  else cb(new Error('Only JPG, PNG, GIF, WEBP files are allowed'), false);
 };
 
 const upload = multer({
   storage: storage,
   fileFilter: fileFilter,
-  limits: { fileSize: 5 * 1024 * 1024 } // 5MB max
+  limits: { fileSize: 5 * 1024 * 1024 }
 });
 
-// ----------------------
-// GROUPS
-// ----------------------
+// Protect group routes
+router.use(authenticateToken);
 
-// ✅ Create group — owner is added automatically as "owner" role
+// Create Group
 router.post("/create", upload.single('groupIcon'), (req, res) => {
   try {
-    const { name, description, createdBy, createdById } = req.body;
+    const { name, description } = req.body;
+    const createdById = req.user.id;      // ✅ SECURE
+    const createdBy = req.user.username;  // ✅ SECURE
     
-    if (!name || name.trim().length < 3) {
+    const cleanedName = clean(name);
+    if (!cleanedName || cleanedName.length < 3) {
       if (req.file) fs.unlinkSync(req.file.path);
-      return res.json({ success: false, error: "Name too short" });
+      return res.json({ success: false, error: "Name too short or invalid" });
     }
 
     let iconUrl = "/uploads/groups/default-group.png";
-    if (req.file) {
-      iconUrl = "/uploads/groups/" + req.file.filename;
-    }
+    if (req.file) iconUrl = "/uploads/groups/" + req.file.filename;
 
     const newGroup = {
       id: data.nextGroupId++,
-      name: name.trim(),
+      name: cleanedName,
       iconUrl: iconUrl,
       createdBy: createdBy,
       createdById: createdById,
-      description: description ? description.trim() : "",
+      description: clean(description), // ✅ SANITIZED
       createdDate: new Date().toISOString(),
       members: [
-        { userId: Number(createdById), username: createdBy, role: "owner" } // creator = owner
+        { userId: createdById, username: createdBy, role: "owner" }
       ]
     };
 
@@ -78,138 +70,99 @@ router.post("/create", upload.single('groupIcon'), (req, res) => {
   } catch (err) {
     if (req.file) fs.unlinkSync(req.file.path);
     console.error("Create Group Error:", err);
-    res.json({ success: false, error: err.message || "Server error" });
-  }
-});
-
-// ✅ Get single group + members
-router.get("/:id", (req, res) => {
-  try {
-    const groupId = Number(req.params.id);
-    const group = data.groups.find(g => g.id === groupId);
-
-    if (!group) {
-      return res.status(404).json({ error: "Group not found" });
-    }
-
-    res.json(group);
-  } catch (err) {
-    console.error("Get Group Error:", err);
-    res.status(500).json({ error: "Server error" });
-  }
-});
-
-// ✅ Join group endpoint — adds user as "member" role
-router.post("/:id/join", (req, res) => {
-  try {
-    const groupId = Number(req.params.id);
-    const { userId, username } = req.body;
-
-    if (!userId || !username) {
-      return res.json({ success: false, error: "Missing user data" });
-    }
-
-    const group = data.groups.find(g => g.id === groupId);
-    if (!group) return res.json({ success: false, error: "Group not found" });
-
-    // Check if already in group
-    const alreadyMember = group.members.some(m => m.userId === Number(userId));
-    if (alreadyMember) {
-      return res.json({ success: false, error: "Already a member" });
-    }
-
-    // Add as member
-    group.members.push({
-      userId: Number(userId),
-      username: username,
-      role: "member"
-    });
-
-    saveData();
-    res.json({ success: true, message: "Joined group" });
-  } catch (err) {
-    console.error("Join Group Error:", err);
     res.json({ success: false, error: "Server error" });
   }
 });
 
-// ==============================================
-// ✅ NEW ENDPOINTS FOR CONFIGURE GROUP PAGE
-// ==============================================
+// Get single group
+router.get("/:id", (req, res) => {
+  const group = data.groups.find(g => g.id === Number(req.params.id));
+  if (!group) return res.status(404).json({ error: "Group not found" });
+  res.json(group);
+});
 
-// ✅ Update Group Icon
+// Join group
+router.post("/:id/join", (req, res) => {
+  const group = data.groups.find(g => g.id === Number(req.params.id));
+  if (!group) return res.json({ success: false, error: "Group not found" });
+
+  const userId = req.user.id;
+  const username = req.user.username;
+
+  if (group.members.some(m => m.userId === userId)) {
+    return res.json({ success: false, error: "Already a member" });
+  }
+
+  group.members.push({ userId, username, role: "member" });
+  saveData();
+  res.json({ success: true, message: "Joined group" });
+});
+
+// Update Group Icon
 router.post("/:id/update-icon", upload.single('groupIcon'), (req, res) => {
   try {
-    const groupId = Number(req.params.id);
-    const group = data.groups.find(g => g.id === groupId);
-    
+    const group = data.groups.find(g => g.id === Number(req.params.id));
     if (!group) return res.json({ success: false, error: "Group not found" });
+    
+    // ✅ PERMISSION CHECK: Verify request caller owns the asset
+    if (group.createdById !== req.user.id) {
+      if (req.file) fs.unlinkSync(req.file.path);
+      return res.status(403).json({ success: false, error: "Forbidden access" });
+    }
+
     if (!req.file) return res.json({ success: false, error: "No image uploaded" });
 
-    // Delete old icon if it's not the default one
     if (group.iconUrl && !group.iconUrl.includes("default-group.png")) {
       const oldIconPath = path.join(__dirname, '../public', group.iconUrl);
       if (fs.existsSync(oldIconPath)) fs.unlinkSync(oldIconPath);
     }
 
-    // Save new icon URL
     group.iconUrl = "/uploads/groups/" + req.file.filename;
     saveData();
 
     res.json({ success: true, newIconUrl: group.iconUrl });
   } catch (err) {
     if (req.file) fs.unlinkSync(req.file.path);
-    res.json({ success: false, error: err.message || "Failed to update icon" });
+    res.json({ success: false, error: "Failed to update icon" });
   }
 });
 
-// ✅ Update Group Description
+// Update Group Description
 router.post("/:id/update-description", (req, res) => {
-  try {
-    const groupId = Number(req.params.id);
-    const { description } = req.body;
-    const group = data.groups.find(g => g.id === groupId);
+  const group = data.groups.find(g => g.id === Number(req.params.id));
+  if (!group) return res.json({ success: false, error: "Group not found" });
 
-    if (!group) return res.json({ success: false, error: "Group not found" });
+  // ✅ PERMISSION CHECK
+  if (group.createdById !== req.user.id) return res.status(403).json({ error: "Forbidden access" });
 
-    // Update and trim to max 500 chars
-    group.description = description ? description.trim().slice(0, 500) : "";
-    saveData();
-
-    res.json({ success: true });
-  } catch (err) {
-    res.json({ success: false, error: err.message || "Failed to update description" });
-  }
+  group.description = clean(req.body.description).slice(0, 500);
+  saveData();
+  res.json({ success: true });
 });
 
-// ✅ Change Group Ownership
+// Change Group Ownership
 router.post("/:id/change-owner", (req, res) => {
-  try {
-    const groupId = Number(req.params.id);
-    const { newOwnerId } = req.body;
-    const group = data.groups.find(g => g.id === groupId);
+  const group = data.groups.find(g => g.id === Number(req.params.id));
+  if (!group) return res.json({ success: false, error: "Group not found" });
 
-    if (!group) return res.json({ success: false, error: "Group not found" });
+  // ✅ PERMISSION CHECK: Only current owner can hand off control
+  if (group.createdById !== req.user.id) return res.status(403).json({ error: "Forbidden access" });
 
-    // Check if new owner is actually a member
-    const newOwnerMember = group.members.find(m => m.userId === Number(newOwnerId));
-    if (!newOwnerMember) return res.json({ success: false, error: "User is not in this group" });
+  const newOwnerId = Number(req.body.newOwnerId);
+  const newOwnerMember = group.members.find(m => m.userId === newOwnerId);
+  if (!newOwnerMember) return res.json({ success: false, error: "User is not in this group" });
 
-    // Update ownership
-    group.createdById = Number(newOwnerId);
-    group.createdBy = newOwnerMember.username;
+  const oldOwnerId = group.createdById;
+  group.createdById = newOwnerId;
+  group.createdBy = newOwnerMember.username;
 
-    // Update roles: old owner → member, new owner → owner
-    group.members.forEach(m => {
-      if (m.userId === Number(newOwnerId)) m.role = "owner";
-      if (m.userId === group.createdById && m.userId !== Number(newOwnerId)) m.role = "member";
-    });
+  group.members.forEach(m => {
+    if (m.userId === newOwnerId) m.role = "owner";
+    if (m.userId === oldOwnerId) m.role = "member";
+  });
 
-    saveData();
-    res.json({ success: true });
-  } catch (err) {
-    res.json({ success: false, error: err.message || "Failed to change owner" });
-  }
+  saveData();
+  res.json({ success: true });
 });
 
 module.exports = router;

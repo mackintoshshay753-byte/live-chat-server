@@ -1,15 +1,19 @@
 const express = require('express');
 const router = express.Router();
 const { data, saveData } = require('../data');
+const { authenticateToken } = require('../helpers');
+
+// Apply session verification across all friend connections
+router.use(authenticateToken);
 
 // Send friend request
 router.post("/request", (req, res) => {
-  const { fromId, fromUsername, toId } = req.body;
-  const fromIdNum = Number(fromId);
-  const toIdNum = Number(toId);
+  const fromIdNum = req.user.id; // ✅ SECURE: Extracted from token
+  const fromUsername = req.user.username; // ✅ SECURE: Extracted from token
+  const toIdNum = Number(req.body.toId);
 
-  if (!fromIdNum || !toIdNum || fromIdNum === toIdNum) 
-    return res.json({ success: false, error: "Invalid" });
+  if (!toIdNum || fromIdNum === toIdNum) 
+    return res.status(400).json({ success: false, error: "Invalid ID parameters" });
 
   if (!data.friendRequests[toIdNum]) data.friendRequests[toIdNum] = [];
 
@@ -29,22 +33,23 @@ router.post("/request", (req, res) => {
 });
 
 // Get my incoming requests
-router.get("/requests/:userId", (req, res) => {
-  const userId = Number(req.params.userId);
+router.get("/requests/me", (req, res) => {
+  const userId = req.user.id; // ✅ SECURE: Pulled directly from token
   res.json({ requests: data.friendRequests[userId] || [] });
 });
 
 // Accept request
 router.post("/accept", (req, res) => {
-  const { fromId, toId } = req.body;
-  const fromIdNum = Number(fromId);
-  const toIdNum = Number(toId);
+  const toIdNum = req.user.id; // ✅ SECURE: The receiver is the logged-in user
+  const fromIdNum = Number(req.body.fromId);
 
-  if (!fromIdNum || !toIdNum) return res.json({ success: false });
+  if (!fromIdNum) return res.status(400).json({ success: false, error: "Missing sender parameter" });
 
-  if (data.friendRequests[toIdNum]) {
-    data.friendRequests[toIdNum] = data.friendRequests[toIdNum].filter(r => r.fromId !== fromIdNum);
-  }
+  // Verify the request exists before adding connection
+  const hasRequest = data.friendRequests[toIdNum]?.some(r => r.fromId === fromIdNum);
+  if (!hasRequest) return res.json({ success: false, error: "No pending request found" });
+
+  data.friendRequests[toIdNum] = data.friendRequests[toIdNum].filter(r => r.fromId !== fromIdNum);
 
   if (!data.friends[fromIdNum]) data.friends[fromIdNum] = [];
   if (!data.friends[toIdNum]) data.friends[toIdNum] = [];
@@ -57,9 +62,8 @@ router.post("/accept", (req, res) => {
 
 // Reject request
 router.post("/reject", (req, res) => {
-  const { fromId, toId } = req.body;
-  const fromIdNum = Number(fromId);
-  const toIdNum = Number(toId);
+  const toIdNum = req.user.id; // ✅ SECURE
+  const fromIdNum = Number(req.body.fromId);
 
   if (data.friendRequests[toIdNum]) {
     data.friendRequests[toIdNum] = data.friendRequests[toIdNum].filter(r => r.fromId !== fromIdNum);
@@ -70,9 +74,8 @@ router.post("/reject", (req, res) => {
 
 // Unfriend
 router.post("/unfriend", (req, res) => {
-  const { userId, friendId } = req.body;
-  const userIdNum = Number(userId);
-  const friendIdNum = Number(friendId);
+  const userIdNum = req.user.id; // ✅ SECURE
+  const friendIdNum = Number(req.body.friendId);
 
   if (data.friends[userIdNum]) data.friends[userIdNum] = data.friends[userIdNum].filter(id => id !== friendIdNum);
   if (data.friends[friendIdNum]) data.friends[friendIdNum] = data.friends[friendIdNum].filter(id => id !== userIdNum);
@@ -81,8 +84,8 @@ router.post("/unfriend", (req, res) => {
 });
 
 // Get my friends list
-router.get("/list/:userId", (req, res) => {
-  const userId = Number(req.params.userId);
+router.get("/list", (req, res) => {
+  const userId = req.user.id; // ✅ SECURE
   const friendIds = data.friends[userId] || [];
 
   const friends = Object.entries(data.accounts).map(([username, info]) => ({
