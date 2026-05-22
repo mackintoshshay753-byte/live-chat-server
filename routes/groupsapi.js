@@ -212,25 +212,28 @@ router.post("/:id/change-owner", (req, res) => {
   }
 });
 
-// ✅ Search groups endpoint — works just like user search
+// ✅ Search groups endpoint — FIXED: added safety check for data.groups
 router.get("/search", (req, res) => {
   try {
     const { keyword, page = 1 } = req.query;
     const cleanKeyword = (keyword || "").trim().toLowerCase();
     const RESULTS_PER_PAGE = 12;
 
+    // ✅ FIX: make sure data.groups exists and is an array
+    const allGroups = Array.isArray(data.groups) ? data.groups : [];
+
     // Filter groups by name match
-    let matched = data.groups.filter(g => 
-      g.name.toLowerCase().includes(cleanKeyword)
+    let matched = allGroups.filter(g => 
+      g.name && g.name.toLowerCase().includes(cleanKeyword)
     );
 
     // Sort: best match first, then newest
     matched.sort((a, b) => {
-      const aStarts = a.name.toLowerCase().startsWith(cleanKeyword);
-      const bStarts = b.name.toLowerCase().startsWith(cleanKeyword);
+      const aStarts = a.name && a.name.toLowerCase().startsWith(cleanKeyword);
+      const bStarts = b.name && b.name.toLowerCase().startsWith(cleanKeyword);
       if (aStarts && !bStarts) return -1;
       if (!aStarts && bStarts) return 1;
-      return new Date(b.createdDate) - new Date(a.createdDate);
+      return new Date(b.createdDate || 0) - new Date(a.createdDate || 0);
     });
 
     // Pagination

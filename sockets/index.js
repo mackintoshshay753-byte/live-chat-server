@@ -2,37 +2,45 @@ const bcrypt = require('bcrypt');
 const { data, saveData } = require('../data');
 const { clean, createProfile } = require('../helpers');
 
-const onlineUsers = new Map();
+// ✅ This MUST be declared BEFORE exports
+const onlineUsers = new Map(); // username -> socket.id
 
 function setupSockets(io) {
   io.on("connection", (socket) => {
     console.log("🔌 User connected");
 
+    // ==================== LAST ONLINE ====================
     socket.on("join", (username) => {
       const cleanName = clean(username);
       if (!cleanName) return;
 
-      socket.data.user = cleanName;
+      // ✅ Add user to online list
+      onlineUsers.set(cleanName, socket.id);
 
-      onlineUsers.set(socket.id, cleanName);
-
+      // Update last seen time
       if (data.userProfiles[cleanName]) {
         data.userProfiles[cleanName].lastOnline = new Date().toISOString();
         saveData();
       }
+      console.log(`👤 ${cleanName} is online | Total online: ${onlineUsers.size}`);
     });
 
     socket.on("disconnect", () => {
-      const username = onlineUsers.get(socket.id);
-      if (username) {
-        if (data.userProfiles[username]) {
-          data.userProfiles[username].lastOnline = new Date().toISOString();
-          saveData();
+      for (const [username, id] of onlineUsers.entries()) {
+        if (id === socket.id) {
+          // ✅ Remove from online list
+          if (data.userProfiles[username]) {
+            data.userProfiles[username].lastOnline = new Date().toISOString();
+            saveData();
+          }
+          onlineUsers.delete(username);
+          console.log(`👤 ${username} went offline | Total online: ${onlineUsers.size}`);
+          break;
         }
-        onlineUsers.delete(socket.id);
       }
     });
 
+    // ==================== AUTH ====================
     socket.on("login", async ({ username, password }, cb) => {
       try {
         const name = clean(username);
@@ -46,10 +54,9 @@ function setupSockets(io) {
         if (!validPassword)
           return safeCb(cb, { success: false, message: "Incorrect password" });
 
-        socket.data.user = name;
-
         safeCb(cb, { success: true, username: name, id: account.id, theme: account.theme });
       } catch (err) {
+        console.error("Login Error:", err);
         safeCb(cb, { success: false, message: "Server error — try again" });
       }
     });
@@ -82,24 +89,24 @@ function setupSockets(io) {
         createProfile(name);
         saveData();
 
-        socket.data.user = name;
-
         safeCb(cb, { success: true, username: name, id });
       } catch (err) {
+        console.error("Signup Error:", err);
         safeCb(cb, { success: false, message: "Server error — try again" });
       }
     });
 
-    socket.on("save-theme", ({ theme }) => {
-      const username = socket.data.user;
-      if (!username) return;
-
-      const account = data.accounts[username];
-      if (!account) return;
-
-      account.theme = theme;
-      if (data.userProfiles[username]) data.userProfiles[username].theme = theme;
-      saveData();
+    // ==================== OTHER HANDLERS ====================
+    socket.on("save-theme", ({ theme, username }) => {
+      try {
+        const account = data.accounts[username];
+        if (!account) return;
+        account.theme = theme;
+        if (data.userProfiles[username]) data.userProfiles[username].theme = theme;
+        saveData();
+      } catch (err) {
+        console.error("Save Theme Error:", err);
+      }
     });
 
     socket.on("change username", ({ oldName, newName }, cb) => {
@@ -123,15 +130,15 @@ function setupSockets(io) {
         delete data.registeredNames[oldLower];
         data.registeredNames[newLower] = true;
 
-        const accountData = data.accounts[cleanOld];
+        const oldAccountData = data.accounts[cleanOld];
         delete data.accounts[cleanOld];
-        data.accounts[cleanNew] = accountData;
+        data.accounts[cleanNew] = oldAccountData;
 
-        const profile = data.userProfiles[cleanOld];
-        if (profile) {
+        const oldProfile = data.userProfiles[cleanOld];
+        if (oldProfile) {
           delete data.userProfiles[cleanOld];
-          profile.username = cleanNew;
-          data.userProfiles[cleanNew] = profile;
+          oldProfile.username = cleanNew;
+          data.userProfiles[cleanNew] = oldProfile;
         }
 
         if (data.usernameToId[cleanOld]) {
@@ -139,10 +146,10 @@ function setupSockets(io) {
           delete data.usernameToId[cleanOld];
         }
 
-        const socketId = [...onlineUsers.entries()].find(([id, u]) => u === cleanOld)?.[0];
-
-        if (socketId) {
-          onlineUsers.set(socketId, cleanNew);
+        // ✅ Update online status to new name
+        if (onlineUsers.has(cleanOld)) {
+          onlineUsers.set(cleanNew, onlineUsers.get(cleanOld));
+          onlineUsers.delete(cleanOld);
         }
 
         saveData();
@@ -150,23 +157,21 @@ function setupSockets(io) {
 
         safeCb(cb, { success: true, newName: cleanNew });
       } catch (err) {
+        console.error("Change Username Error:", err);
         safeCb(cb, { success: false, message: "Server error — try again" });
       }
     });
 
-    socket.on("change password", async ({ newPassword }, cb) => {
+    socket.on("change password", async ({ username, newPassword }, cb) => {
       try {
-        const username = socket.data.user;
-        if (!username)
-          return safeCb(cb, { success: false, message: "Not logged in" });
-
-        const account = data.accounts[username];
+        const name = clean(username);
+        const account = data.accounts[name];
         if (!account)
           return safeCb(cb, { success: false, message: "Account not found" });
 
         const sameAsOld = await bcrypt.compare(newPassword, account.hash);
         if (sameAsOld)
-          return safeCb(cb, { success: false, message: "Password cannot be the same" });
+          return safeCb(cb, { success: false, message: "Password cannot be the same as it already is" });
 
         if (newPassword.length < 8)
           return safeCb(cb, { success: false, message: "Password must be at least 8 characters" });
@@ -176,6 +181,7 @@ function setupSockets(io) {
 
         safeCb(cb, { success: true, message: "Password updated successfully" });
       } catch (err) {
+        console.error("CHANGE PASSWORD ERROR:", err);
         safeCb(cb, { success: false, message: "Something went wrong" });
       }
     });
@@ -186,5 +192,6 @@ function safeCb(cb, data) {
   if (typeof cb === "function") cb(data);
 }
 
+// ==================== ✅ FIXED EXPORTS ====================
 module.exports = setupSockets;
 module.exports.onlineUsers = onlineUsers;
