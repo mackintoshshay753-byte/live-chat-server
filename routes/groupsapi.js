@@ -212,4 +212,39 @@ router.post("/:id/change-owner", (req, res) => {
   }
 });
 
+// ✅ Search groups endpoint — works just like user search
+router.get("/search", (req, res) => {
+  try {
+    const { keyword, page = 1 } = req.query;
+    const cleanKeyword = (keyword || "").trim().toLowerCase();
+    const RESULTS_PER_PAGE = 12;
+
+    // Filter groups by name match
+    let matched = data.groups.filter(g => 
+      g.name.toLowerCase().includes(cleanKeyword)
+    );
+
+    // Sort: best match first, then newest
+    matched.sort((a, b) => {
+      const aStarts = a.name.toLowerCase().startsWith(cleanKeyword);
+      const bStarts = b.name.toLowerCase().startsWith(cleanKeyword);
+      if (aStarts && !bStarts) return -1;
+      if (!aStarts && bStarts) return 1;
+      return new Date(b.createdDate) - new Date(a.createdDate);
+    });
+
+    // Pagination
+    const total = matched.length;
+    const pages = Math.ceil(total / RESULTS_PER_PAGE);
+    const start = (page - 1) * RESULTS_PER_PAGE;
+    const end = start + RESULTS_PER_PAGE;
+    const results = matched.slice(start, end);
+
+    res.json({ results, total, pages });
+  } catch (err) {
+    console.error("Search Groups Error:", err);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
 module.exports = router;
