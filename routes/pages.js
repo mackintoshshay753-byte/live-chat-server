@@ -8,8 +8,9 @@ router.get("/users/profile", (req, res) => res.sendFile(path.join(__dirname, '..
 router.get("/groups/create", (req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'create-group.html')));
 router.get("/groups/groups", (req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'group.html')));
 router.get("/groups/configure", (req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'configure.html')));
-router.get("/search/users", (req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'search.html')));
-router.get("/search/groups", (req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'search-groups.html'))); // ✅ matches your file
+router.get("/search/users", (req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'search', 'users.html')));
+// ✅ THIS IS THE FIX — matches your folder/file: /search/groups.html
+router.get("/search/groups", (req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'search', 'groups.html')));
 router.get("/my/account", (req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'account.html')));
 
 module.exports = router;

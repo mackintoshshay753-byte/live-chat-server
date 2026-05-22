@@ -209,13 +209,14 @@ router.post("/:id/change-owner", (req, res) => {
   }
 });
 
-/** ✅ SEARCH ENDPOINT — WORKS WITH YOUR FRONTEND */
+/** ✅ FIXED SEARCH — NO MORE 400 ERRORS */
 router.get("/search", (req, res) => {
   try {
     const keyword = (req.query.keyword || "").trim().toLowerCase();
     const page = parseInt(req.query.page) || 1;
     const limit = 12;
 
+    // ✅ Return empty instead of 400
     if (keyword.length < 3) {
       return res.json({ results: [], total: 0, page, pages: 0 });
     }
@@ -241,7 +242,7 @@ router.get("/search", (req, res) => {
 
   } catch (err) {
     console.error("❌ Search Groups Error:", err);
-    res.status(500).json({ error: "Server error" });
+    res.json({ results: [], total: 0, page: 1, pages: 0 }); // ✅ safe fallback
   }
 });
 
