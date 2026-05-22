@@ -212,40 +212,64 @@ router.post("/:id/change-owner", (req, res) => {
   }
 });
 
-// ✅ Search groups endpoint — FIXED: added safety check for data.groups
+// ----------------------
+// SEARCH GROUPS
+// ----------------------
 router.get("/search", (req, res) => {
   try {
-    const { keyword, page = 1 } = req.query;
-    const cleanKeyword = (keyword || "").trim().toLowerCase();
-    const RESULTS_PER_PAGE = 12;
+    let keyword = (req.query.keyword || "").trim();
+    const page = parseInt(req.query.page) || 1;
+    const limit = 12;
 
-    // ✅ FIX: make sure data.groups exists and is an array
-    const allGroups = Array.isArray(data.groups) ? data.groups : [];
+    if (!keyword || keyword.length < 2) {
+      return res.json({
+        results: [],
+        total: 0,
+        page,
+        pages: 0
+      });
+    }
 
-    // Filter groups by name match
-    let matched = allGroups.filter(g => 
-      g.name && g.name.toLowerCase().includes(cleanKeyword)
-    );
+    keyword = keyword.toLowerCase();
 
-    // Sort: best match first, then newest
-    matched.sort((a, b) => {
-      const aStarts = a.name && a.name.toLowerCase().startsWith(cleanKeyword);
-      const bStarts = b.name && b.name.toLowerCase().startsWith(cleanKeyword);
-      if (aStarts && !bStarts) return -1;
-      if (!aStarts && bStarts) return 1;
-      return new Date(b.createdDate || 0) - new Date(a.createdDate || 0);
+    const matches = data.groups
+      .filter(group => 
+        group.name.toLowerCase().includes(keyword) ||
+        (group.description && group.description.toLowerCase().includes(keyword))
+      )
+      .map(group => {
+        const memberCount = group.members ? group.members.length : 0;
+        const owner = group.members?.find(m => m.role === "owner") || 
+                     { username: group.createdBy };
+
+        return {
+          id: group.id,
+          name: group.name,
+          iconUrl: group.iconUrl || "/uploads/groups/default-group.png",
+          description: group.description || "",
+          memberCount: memberCount,
+          createdDate: group.createdDate,
+          owner: owner.username,
+          isPublic: true // You can make this configurable later
+        };
+      });
+
+    // Sort alphabetically
+    matches.sort((a, b) => a.name.localeCompare(b.name));
+
+    const total = matches.length;
+    const pages = Math.ceil(total / limit);
+    const start = (page - 1) * limit;
+    const results = matches.slice(start, start + limit);
+
+    res.json({
+      results,
+      total,
+      page,
+      pages
     });
-
-    // Pagination
-    const total = matched.length;
-    const pages = Math.ceil(total / RESULTS_PER_PAGE);
-    const start = (page - 1) * RESULTS_PER_PAGE;
-    const end = start + RESULTS_PER_PAGE;
-    const results = matched.slice(start, end);
-
-    res.json({ results, total, pages });
   } catch (err) {
-    console.error("Search Groups Error:", err);
+    console.error("Group Search Error:", err);
     res.status(500).json({ error: "Server error" });
   }
 });
