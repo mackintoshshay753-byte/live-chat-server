@@ -5,7 +5,6 @@ const path = require('path');
 const fs = require('fs');
 
 const { data, saveData } = require('../data');
-const { clean } = require('../helpers'); // reuse your clean function
 
 // ----------------------
 // IMAGE UPLOAD CONFIG
@@ -213,8 +212,8 @@ router.post("/:id/change-owner", (req, res) => {
   }
 });
 
-// ✅ GROUP SEARCH ENDPOINT — matches your user search logic
-router.get("/search", (req, res) => {
+// ✅ GROUP SEARCH ENDPOINT — matches /api/search/groups
+router.get("/search/groups", (req, res) => {
   try {
     let keyword = clean(req.query.keyword || "");
     const page = parseInt(req.query.page) || 1;
