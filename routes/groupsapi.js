@@ -305,89 +305,74 @@ router.get("/ads/random", (req, res) => {
 });
 
 router.get("/:id/wall", (req, res) => {
-
   try {
-
-    const groupId = Number(req.params.id);
-
-    const group = data.groups.find(g => g.id === groupId);
-
-    if (!group) {
-      return res.json({
-        posts: []
-      });
-    }
-
-    if (!group.wallPosts) {
-      group.wallPosts = [];
-    }
+    const g = data.groups.find(x => x.id === +req.params.id);
+    if (!g) return res.json({ posts: [] });
 
     res.json({
-      posts: group.wallPosts
+      posts: g.wallPosts || []
     });
 
-  } catch(err) {
-
-    console.error("Load Wall Error:", err);
-
-    res.json({
-      posts: []
-    });
+  } catch {
+    res.json({ posts: [] });
   }
 });
 
 router.post("/:id/wall/create", (req, res) => {
   try {
-    const groupId = Number(req.params.id);
-    const {
-      userId,
-      username,
-      avatar,
-      message
-    } = req.body;
-    const group = data.groups.find(g => g.id === groupId);
-    if (!group) {
-      return res.json({
-        success: false,
-        error: "Group not found"
-      });
-    }
-    const isMember = group.members.some(
-      m => m.userId === Number(userId)
-    );
-    if (!isMember) {
-      return res.json({
-        success: false,
-        error: "You must be in the group to post."
-      });
-    }
-    if (!message || !message.trim()) {
-      return res.json({
-        success: false,
-        error: "Message required."
-      });
-    }
-    if (!group.wallPosts) {
-      group.wallPosts = [];
-    }
-    group.wallPosts.push({
+    const g = data.groups.find(x => x.id === +req.params.id);
+    if (!g) return res.json({ success: false, error: "Group not found" });
+
+    const { userId, username, avatar, message } = req.body;
+
+    if (!g.members.some(m => m.userId === +userId))
+      return res.json({ success: false, error: "Not a member" });
+
+    if (!message?.trim())
+      return res.json({ success: false, error: "Message required" });
+
+    if (!g.wallPosts) g.wallPosts = [];
+
+    g.wallPosts.push({
       id: Date.now(),
-      userId: Number(userId),
-      username: username,
+      userId: +userId,
+      username,
       avatar: avatar || "",
       message: message.trim().slice(0, 450),
       createdAt: new Date().toISOString()
     });
+
     saveData();
-    res.json({
-      success: true
-    });
-  } catch(err) {
-    console.error("Create Wall Post Error:", err);
-    res.json({
-      success: false,
-      error: "Server error"
-    });
+    res.json({ success: true });
+
+  } catch {
+    res.json({ success: false, error: "Server error" });
+  }
+});
+
+router.delete("/:groupId/wall/:postId", (req, res) => {
+  try {
+    const g = data.groups.find(x => x.id === +req.params.groupId);
+    if (!g) return res.json({ success: false, error: "Group not found" });
+
+    const { userId } = req.body;
+    const p = g.wallPosts.find(x => x.id === +req.params.postId);
+
+    if (!p) return res.json({ success: false, error: "Post not found" });
+
+    const ok =
+      +g.createdById === +userId ||
+      +p.userId === +userId;
+
+    if (!ok) return res.json({ success: false, error: "No permission" });
+
+    g.wallPosts = g.wallPosts.filter(x => x.id !== +req.params.postId);
+
+    saveData();
+    res.json({ success: true });
+
+  } catch {
+    res.json({ success: false, error: "Server error" });
   }
 });
 
