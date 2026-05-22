@@ -7,15 +7,13 @@ const fs = require('fs');
 const { data, saveData } = require('../data');
 
 // ----------------------
-// ✅ IMAGE UPLOAD CONFIG (FIXED PATHS + SAFETY)
+// ✅ IMAGE UPLOAD CONFIG
 // ----------------------
 const UPLOAD_FOLDER = path.join(__dirname, '../public/uploads/groups');
-// Create folder if missing — with full permissions
 if (!fs.existsSync(UPLOAD_FOLDER)) {
   fs.mkdirSync(UPLOAD_FOLDER, { recursive: true, mode: 0o755 });
 }
 
-// Allowed file types + size limit
 const allowedMimeTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
 
@@ -24,7 +22,6 @@ const storage = multer.diskStorage({
     cb(null, UPLOAD_FOLDER);
   },
   filename: function (req, file, cb) {
-    // Safe filename: no spaces, unique, correct extension
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
     const ext = path.extname(file.originalname).toLowerCase();
     const safeName = 'group-' + uniqueSuffix + ext;
@@ -40,7 +37,6 @@ const fileFilter = (req, file, cb) => {
   }
 };
 
-// Final upload middleware
 const upload = multer({
   storage: storage,
   fileFilter: fileFilter,
@@ -48,19 +44,16 @@ const upload = multer({
 });
 
 // ----------------------
-// ✅ GROUPS ENDPOINTS (FULLY FIXED)
+// ✅ GROUPS ENDPOINTS
 // ----------------------
 
-/**
- * Create group — owner added automatically, icon saved correctly
- */
+/** Create group */
 router.post("/create", upload.single('groupIcon'), (req, res) => {
   try {
     const { name, description, createdBy, createdById } = req.body;
 
-    // ✅ Validation
     if (!name || name.trim().length < 3) {
-      if (req.file) fs.unlinkSync(req.file.path); // Cleanup invalid upload
+      if (req.file) fs.unlinkSync(req.file.path);
       return res.json({ success: false, error: "Group name must be at least 3 characters" });
     }
     if (!createdBy || !createdById) {
@@ -68,65 +61,44 @@ router.post("/create", upload.single('groupIcon'), (req, res) => {
       return res.json({ success: false, error: "Missing creator information" });
     }
 
-    // ✅ Set icon path — CORRECT RELATIVE PATH FOR FRONTEND
     let iconUrl = "/uploads/groups/default-group.png";
     if (req.file) {
       iconUrl = "/uploads/groups/" + req.file.filename;
     }
 
-    // ✅ Create group object with ALL required fields
     const newGroup = {
       id: data.nextGroupId++,
       name: name.trim(),
-      iconUrl: iconUrl, // ✅ This is what your frontend uses
+      iconUrl: iconUrl,
       createdBy: createdBy.trim(),
       createdById: Number(createdById),
       description: description ? description.trim() : "",
       createdDate: new Date().toISOString(),
       members: [
-        { 
-          userId: Number(createdById), 
-          username: createdBy.trim(), 
-          role: "owner" 
-        }
+        { userId: Number(createdById), username: createdBy.trim(), role: "owner" }
       ]
     };
 
-    // ✅ Save to data store
     data.groups.push(newGroup);
     saveData();
 
-    // ✅ Return FULL iconUrl so frontend can display immediately
-    res.json({ 
-      success: true, 
-      groupId: newGroup.id,
-      iconUrl: iconUrl 
-    });
+    res.json({ success: true, groupId: newGroup.id, iconUrl: iconUrl });
 
   } catch (err) {
-    // Cleanup uploaded file if something breaks
-    if (req.file) {
-      try { fs.unlinkSync(req.file.path); } catch (e) {}
-    }
+    if (req.file) { try { fs.unlinkSync(req.file.path); } catch (e) {} }
     console.error("❌ Create Group Error:", err);
     res.json({ success: false, error: err.message || "Server error while creating group" });
   }
 });
 
-/**
- * Get single group + members
- */
+/** Get single group */
 router.get("/:id", (req, res) => {
   try {
     const groupId = Number(req.params.id);
-    if (isNaN(groupId)) {
-      return res.status(400).json({ error: "Invalid group ID" });
-    }
+    if (isNaN(groupId)) return res.status(400).json({ error: "Invalid group ID" });
 
     const group = data.groups.find(g => g.id === groupId);
-    if (!group) {
-      return res.status(404).json({ error: "Group not found" });
-    }
+    if (!group) return res.status(404).json({ error: "Group not found" });
 
     res.json(group);
   } catch (err) {
@@ -135,37 +107,22 @@ router.get("/:id", (req, res) => {
   }
 });
 
-/**
- * Join group — adds user as "member" role
- */
+/** Join group */
 router.post("/:id/join", (req, res) => {
   try {
     const groupId = Number(req.params.id);
     const { userId, username } = req.body;
 
-    if (!userId || !username) {
-      return res.json({ success: false, error: "Missing user data" });
-    }
-    if (isNaN(groupId)) {
-      return res.json({ success: false, error: "Invalid group ID" });
-    }
+    if (!userId || !username) return res.json({ success: false, error: "Missing user data" });
+    if (isNaN(groupId)) return res.json({ success: false, error: "Invalid group ID" });
 
     const group = data.groups.find(g => g.id === groupId);
     if (!group) return res.json({ success: false, error: "Group not found" });
 
-    // Check if already member
     const alreadyMember = group.members.some(m => m.userId === Number(userId));
-    if (alreadyMember) {
-      return res.json({ success: false, error: "You are already in this group" });
-    }
+    if (alreadyMember) return res.json({ success: false, error: "You are already in this group" });
 
-    // Add as regular member
-    group.members.push({
-      userId: Number(userId),
-      username: username.trim(),
-      role: "member"
-    });
-
+    group.members.push({ userId: Number(userId), username: username.trim(), role: "member" });
     saveData();
     res.json({ success: true, message: "Successfully joined group" });
 
@@ -175,13 +132,7 @@ router.post("/:id/join", (req, res) => {
   }
 });
 
-// ==============================================
-// ✅ CONFIGURE GROUP ENDPOINTS — FULLY FIXED
-// ==============================================
-
-/**
- * Update Group Icon
- */
+/** Update Icon */
 router.post("/:id/update-icon", upload.single('groupIcon'), (req, res) => {
   try {
     const groupId = Number(req.params.id);
@@ -191,51 +142,34 @@ router.post("/:id/update-icon", upload.single('groupIcon'), (req, res) => {
     if (!group) return res.json({ success: false, error: "Group not found" });
     if (!req.file) return res.json({ success: false, error: "No image file provided" });
 
-    // ✅ Delete OLD icon (only if not default)
     if (group.iconUrl && !group.iconUrl.includes("default-group.png")) {
       const oldIconFullPath = path.join(__dirname, '../public', group.iconUrl);
-      if (fs.existsSync(oldIconFullPath)) {
-        fs.unlinkSync(oldIconFullPath);
-      }
+      if (fs.existsSync(oldIconFullPath)) fs.unlinkSync(oldIconFullPath);
     }
 
-    // ✅ Save NEW icon path
     group.iconUrl = "/uploads/groups/" + req.file.filename;
     saveData();
-
-    res.json({ 
-      success: true, 
-      newIconUrl: group.iconUrl,
-      message: "Icon updated successfully"
-    });
+    res.json({ success: true, newIconUrl: group.iconUrl, message: "Icon updated successfully" });
 
   } catch (err) {
-    // Cleanup if error
-    if (req.file) {
-      try { fs.unlinkSync(req.file.path); } catch (e) {}
-    }
+    if (req.file) { try { fs.unlinkSync(req.file.path); } catch (e) {} }
     console.error("❌ Update Icon Error:", err);
     res.json({ success: false, error: err.message || "Failed to update icon" });
   }
 });
 
-/**
- * Update Group Description
- */
+/** Update Description */
 router.post("/:id/update-description", (req, res) => {
   try {
     const groupId = Number(req.params.id);
     const { description } = req.body;
-
     if (isNaN(groupId)) return res.json({ success: false, error: "Invalid group ID" });
 
     const group = data.groups.find(g => g.id === groupId);
     if (!group) return res.json({ success: false, error: "Group not found" });
 
-    // ✅ Trim and limit length
     group.description = description ? description.trim().slice(0, 1000) : "";
     saveData();
-
     res.json({ success: true, message: "Description updated" });
 
   } catch (err) {
@@ -244,33 +178,23 @@ router.post("/:id/update-description", (req, res) => {
   }
 });
 
-/**
- * Change Group Ownership
- */
+/** Change Owner */
 router.post("/:id/change-owner", (req, res) => {
   try {
     const groupId = Number(req.params.id);
     const { newOwnerId } = req.body;
-
-    if (isNaN(groupId) || isNaN(Number(newOwnerId))) {
-      return res.json({ success: false, error: "Invalid ID provided" });
-    }
+    if (isNaN(groupId) || isNaN(Number(newOwnerId))) return res.json({ success: false, error: "Invalid ID provided" });
 
     const group = data.groups.find(g => g.id === groupId);
     if (!group) return res.json({ success: false, error: "Group not found" });
 
-    // ✅ Check new owner exists in group
     const newOwnerMember = group.members.find(m => m.userId === Number(newOwnerId));
-    if (!newOwnerMember) {
-      return res.json({ success: false, error: "Selected user is not a member of this group" });
-    }
+    if (!newOwnerMember) return res.json({ success: false, error: "Selected user is not a member of this group" });
 
-    // ✅ Update ownership details
     const oldOwnerId = group.createdById;
     group.createdById = Number(newOwnerId);
     group.createdBy = newOwnerMember.username;
 
-    // ✅ Update roles: old owner → member, new owner → owner
     group.members.forEach(m => {
       if (m.userId === Number(newOwnerId)) m.role = "owner";
       if (m.userId === oldOwnerId && m.userId !== Number(newOwnerId)) m.role = "member";
@@ -285,7 +209,7 @@ router.post("/:id/change-owner", (req, res) => {
   }
 });
 
-// ✅ SEARCH ENDPOINT (matches your earlier error — added so search works!)
+/** ✅ SEARCH ENDPOINT — WORKS WITH YOUR FRONTEND */
 router.get("/search", (req, res) => {
   try {
     const keyword = (req.query.keyword || "").trim().toLowerCase();
