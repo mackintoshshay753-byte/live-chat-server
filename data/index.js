@@ -10,10 +10,11 @@ const DEFAULT_DATA = {
   accounts: {},
   userProfiles: {},
   usernameToId: {},
-  friendRequests: {}, // ✅ NEW — stores pending requests
-  friends: {},        // ✅ NEW — stores confirmed friends
-  groups: [],         // ✅ ADDED — stores all groups
-  nextGroupId: 1      // ✅ ADDED — auto-increment group IDs
+  friendRequests: {},
+  friends: {},
+  groups: [],
+  nextGroupId: 1,
+  ads: []           // ✅ ADDED — stores all ads
 };
 
 let data = { ...DEFAULT_DATA };

@@ -253,4 +253,54 @@ router.post("/:id/change-owner", (req, res) => {
   }
 });
 
+/** Create ad */
+router.post("/:id/ads/create", upload.single('adImage'), (req, res) => {
+  try {
+    const groupId = Number(req.params.id);
+    const { name, adType, createdById } = req.body;
+
+    const group = data.groups.find(g => g.id === groupId);
+    if (!group) { if (req.file) fs.unlinkSync(req.file.path); return res.json({ success: false, error: "Group not found" }); }
+    if (!req.file) return res.json({ success: false, error: "No image uploaded" });
+    if (!name || name.trim().length < 3) { fs.unlinkSync(req.file.path); return res.json({ success: false, error: "Ad name too short" }); }
+    if (!['728x90', '160x600'].includes(adType)) { fs.unlinkSync(req.file.path); return res.json({ success: false, error: "Invalid ad type" }); }
+
+    if (!data.ads) data.ads = [];
+
+    const newAd = {
+      id: Date.now(),
+      groupId,
+      groupName: group.name,
+      groupIconUrl: group.iconUrl,
+      createdById: Number(createdById),
+      name: name.trim(),
+      adType,
+      imageUrl: "/uploads/groups/" + req.file.filename,
+      createdDate: new Date().toISOString(),
+      active: true
+    };
+
+    data.ads.push(newAd);
+    saveData();
+    res.json({ success: true, adId: newAd.id });
+  } catch (err) {
+    if (req.file) { try { fs.unlinkSync(req.file.path); } catch(e){} }
+    res.json({ success: false, error: err.message || "Server error" });
+  }
+});
+
+/** Get random active ad by type */
+router.get("/ads/random", (req, res) => {
+  try {
+    const { type } = req.query;
+    if (!type) return res.json({ ad: null });
+    const ads = (data.ads || []).filter(a => a.active && a.adType === type);
+    if (ads.length === 0) return res.json({ ad: null });
+    const ad = ads[Math.floor(Math.random() * ads.length)];
+    res.json({ ad });
+  } catch (err) {
+    res.json({ ad: null });
+  }
+});
+
 module.exports = router;
