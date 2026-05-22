@@ -5,6 +5,7 @@ const path = require('path');
 const fs = require('fs');
 
 const { data, saveData } = require('../data');
+const { clean } = require('../helpers'); // reuse your clean function
 
 // ----------------------
 // IMAGE UPLOAD CONFIG
@@ -209,6 +210,52 @@ router.post("/:id/change-owner", (req, res) => {
     res.json({ success: true });
   } catch (err) {
     res.json({ success: false, error: err.message || "Failed to change owner" });
+  }
+});
+
+// ✅ GROUP SEARCH ENDPOINT — matches your user search logic
+router.get("/search", (req, res) => {
+  try {
+    let keyword = clean(req.query.keyword || "");
+    const page = parseInt(req.query.page) || 1;
+    const limit = 12;
+
+    if (!keyword || keyword.length < 3) {
+      return res.json({ results: [], total: 0, page, pages: 0 });
+    }
+
+    keyword = keyword.toLowerCase();
+    const matches = [];
+
+    // Search by group name
+    data.groups.forEach(group => {
+      if (group.name.toLowerCase().includes(keyword)) {
+        matches.push({
+          id: group.id,
+          name: group.name,
+          iconUrl: group.iconUrl,
+          memberCount: group.members.length,
+          createdBy: group.createdBy
+        });
+      }
+    });
+
+    matches.sort((a, b) => a.name.localeCompare(b.name));
+
+    const total = matches.length;
+    const pages = Math.ceil(total / limit);
+    const start = (page - 1) * limit;
+    const results = matches.slice(start, start + limit);
+
+    res.json({
+      results,
+      total,
+      page,
+      pages
+    });
+  } catch (err) {
+    console.error("Group Search API Error:", err);
+    res.status(500).json({ error: "Server error" });
   }
 });
 
