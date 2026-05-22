@@ -212,10 +212,7 @@ router.post("/:id/change-owner", (req, res) => {
   }
 });
 
-// ----------------------
-// SEARCH GROUPS
-// ----------------------
-router.get("/search", (req, res) => {
+router.get("/search", (req, res) => {     // Keep it as "/search"
   try {
     let keyword = (req.query.keyword || "").trim();
     const page = parseInt(req.query.page) || 1;
@@ -240,7 +237,7 @@ router.get("/search", (req, res) => {
       .map(group => {
         const memberCount = group.members ? group.members.length : 0;
         const owner = group.members?.find(m => m.role === "owner") || 
-                     { username: group.createdBy };
+                     { username: group.createdBy || "Unknown" };
 
         return {
           id: group.id,
@@ -249,12 +246,10 @@ router.get("/search", (req, res) => {
           description: group.description || "",
           memberCount: memberCount,
           createdDate: group.createdDate,
-          owner: owner.username,
-          isPublic: true // You can make this configurable later
+          owner: owner.username
         };
       });
 
-    // Sort alphabetically
     matches.sort((a, b) => a.name.localeCompare(b.name));
 
     const total = matches.length;
