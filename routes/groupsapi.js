@@ -10,142 +10,138 @@ const { data, saveData } = require('../data');
 // IMAGE UPLOAD CONFIG
 // ----------------------
 const UPLOAD_FOLDER = path.join(__dirname, '../public/uploads/groups');
+
 if (!fs.existsSync(UPLOAD_FOLDER)) {
   fs.mkdirSync(UPLOAD_FOLDER, { recursive: true });
 }
 
 const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    cb(null, UPLOAD_FOLDER);
-  },
-  filename: function (req, file, cb) {
+  destination: (req, file, cb) => cb(null, UPLOAD_FOLDER),
+  filename: (req, file, cb) => {
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    const ext = path.extname(file.originalname);
-    cb(null, 'group-' + uniqueSuffix + ext);
+    cb(null, 'group-' + uniqueSuffix + path.extname(file.originalname));
   }
 });
 
 const fileFilter = (req, file, cb) => {
-  const allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
-  if (allowedTypes.includes(file.mimetype)) {
-    cb(null, true);
-  } else {
-    cb(new Error('Only JPG, PNG, GIF, WEBP files are allowed'), false);
-  }
+  const allowed = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+  cb(null, allowed.includes(file.mimetype));
 };
 
 const upload = multer({
-  storage: storage,
-  fileFilter: fileFilter,
-  limits: { fileSize: 5 * 1024 * 1024 } // 5MB max
+  storage,
+  fileFilter,
+  limits: { fileSize: 5 * 1024 * 1024 }
 });
 
 // ----------------------
-// GROUPS
+// CREATE GROUP (FIXED)
 // ----------------------
-
-// ✅ Create group — owner is added automatically as "owner" role
 router.post("/create", upload.single('groupIcon'), (req, res) => {
   try {
-    const { name, description, createdBy, createdById } = req.body;
-    
-    if (!name || name.trim().length < 3) {
+    let { name, description, createdBy, createdById } = req.body;
+
+    name = (name || "").trim();
+    createdBy = (createdBy || "Unknown").trim();
+    createdById = Number(createdById) || 0;
+
+    if (name.length < 3) {
       if (req.file) fs.unlinkSync(req.file.path);
       return res.json({ success: false, error: "Name too short" });
     }
 
-    let iconUrl = "/uploads/groups/default-group.png";
-    if (req.file) {
-      iconUrl = "/uploads/groups/" + req.file.filename;
-    }
+    const iconUrl = req.file
+      ? "/uploads/groups/" + req.file.filename
+      : "/uploads/groups/default-group.png";
 
     const newGroup = {
       id: data.nextGroupId++,
-      name: name.trim(),
-      iconUrl: iconUrl,
-      createdBy: createdBy,
-      createdById: createdById,
-      description: description ? description.trim() : "",
+      name,
+      iconUrl,
+      createdBy,
+      createdById,
+      description: (description || "").trim(),
       createdDate: new Date().toISOString(),
+
       members: [
-        { userId: Number(createdById), username: createdBy, role: "owner" }
+        {
+          userId: createdById,
+          username: createdBy,
+          role: "owner"
+        }
       ],
+
       wallPosts: []
     };
 
     data.groups.push(newGroup);
     saveData();
+
     res.json({ success: true, groupId: newGroup.id });
+
   } catch (err) {
     if (req.file) fs.unlinkSync(req.file.path);
-    console.error("Create Group Error:", err);
-    res.json({ success: false, error: err.message || "Server error" });
+    res.json({ success: false, error: err.message });
   }
 });
 
-/** ✅ SEARCH ENDPOINT — NOW 100% WORKING */
+// ----------------------
+// SEARCH
+// ----------------------
 router.get("/search", (req, res) => {
   try {
-    const keyword = (req.query.keyword || "").trim().toLowerCase();
-    const page = parseInt(req.query.page) || 1;
+    const keyword = (req.query.keyword || "").toLowerCase().trim();
+    const page = Number(req.query.page) || 1;
     const limit = 12;
 
-    // ✅ Return empty array instead of error
     if (keyword.length < 3) {
       return res.json({ results: [], total: 0, page, pages: 0 });
     }
 
-    // ✅ Filter groups by name
-    const matches = data.groups.filter(group => 
-      group.name.toLowerCase().includes(keyword)
-    );
-
-    // ✅ Sort alphabetically
-    matches.sort((a, b) => a.name.localeCompare(b.name));
+    const matches = data.groups
+      .filter(g => (g.name || "").toLowerCase().includes(keyword))
+      .sort((a, b) => a.name.localeCompare(b.name));
 
     const total = matches.length;
-    const pages = Math.ceil(total / limit);
-    const start = (page - 1) * limit;
 
-    // ✅ Format results for frontend
-    const results = matches.slice(start, start + limit).map(g => ({
-      id: g.id,
-      name: g.name,
-      iconUrl: g.iconUrl,
-      memberCount: g.members.length,
-      createdBy: g.createdBy
-    }));
-
-    res.json({ results, total, page, pages });
+    res.json({
+      results: matches.slice((page - 1) * limit, page * limit).map(g => ({
+        id: g.id,
+        name: g.name,
+        iconUrl: g.iconUrl,
+        memberCount: g.members?.length || 0,
+        createdBy: g.createdBy || "Unknown"
+      })),
+      total,
+      page,
+      pages: Math.ceil(total / limit)
+    });
 
   } catch (err) {
-    console.error("❌ Search Groups Error:", err);
     res.json({ results: [], total: 0, page: 1, pages: 0 });
   }
 });
 
-// ✅ Get single group + members
+// ----------------------
+// GET GROUP
+// ----------------------
 router.get("/:id", (req, res) => {
-  try {
-    const groupId = Number(req.params.id);
-    const group = data.groups.find(g => g.id === groupId);
+  const groupId = Number(req.params.id);
+  const group = data.groups.find(g => g.id === groupId);
 
-    if (!group) {
-      return res.status(404).json({ error: "Group not found" });
-    }
+  if (!group) return res.status(404).json({ error: "Group not found" });
 
-    res.json(group);
-  } catch (err) {
-    console.error("Get Group Error:", err);
-    res.status(500).json({ error: "Server error" });
-  }
+  res.json(group);
 });
 
-// ✅ Join group endpoint — adds user as "member" role
+// ----------------------
+// JOIN GROUP
+// ----------------------
 router.post("/:id/join", (req, res) => {
   try {
     const groupId = Number(req.params.id);
-    const { userId, username } = req.body;
+    const userId = Number(req.body.userId);
+    const username = req.body.username;
 
     if (!userId || !username) {
       return res.json({ success: false, error: "Missing user data" });
@@ -154,209 +150,119 @@ router.post("/:id/join", (req, res) => {
     const group = data.groups.find(g => g.id === groupId);
     if (!group) return res.json({ success: false, error: "Group not found" });
 
-    // Check if already in group
-    const alreadyMember = group.members.some(m => m.userId === Number(userId));
-    if (alreadyMember) {
+    if (group.members.some(m => m.userId === userId)) {
       return res.json({ success: false, error: "Already a member" });
     }
 
-    // Add as member
-    group.members.push({
-      userId: Number(userId),
-      username: username,
-      role: "member"
-    });
-
+    group.members.push({ userId, username, role: "member" });
     saveData();
-    res.json({ success: true, message: "Joined group" });
-  } catch (err) {
-    console.error("Join Group Error:", err);
+
+    res.json({ success: true });
+
+  } catch {
     res.json({ success: false, error: "Server error" });
   }
 });
 
-// ==============================================
-// ✅ NEW ENDPOINTS FOR CONFIGURE GROUP PAGE
-// ==============================================
-
-// ✅ Update Group Icon
+// ----------------------
+// UPDATE ICON
+// ----------------------
 router.post("/:id/update-icon", upload.single('groupIcon'), (req, res) => {
   try {
-    const groupId = Number(req.params.id);
-    const group = data.groups.find(g => g.id === groupId);
-    
+    const group = data.groups.find(g => g.id === Number(req.params.id));
     if (!group) return res.json({ success: false, error: "Group not found" });
     if (!req.file) return res.json({ success: false, error: "No image uploaded" });
 
-    // Delete old icon if it's not the default one
     if (group.iconUrl && !group.iconUrl.includes("default-group.png")) {
-      const oldIconPath = path.join(__dirname, '../public', group.iconUrl);
-      if (fs.existsSync(oldIconPath)) fs.unlinkSync(oldIconPath);
+      const oldPath = path.join(__dirname, "../public", group.iconUrl);
+      if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
     }
 
-    // Save new icon URL
     group.iconUrl = "/uploads/groups/" + req.file.filename;
     saveData();
 
     res.json({ success: true, newIconUrl: group.iconUrl });
+
   } catch (err) {
     if (req.file) fs.unlinkSync(req.file.path);
-    res.json({ success: false, error: err.message || "Failed to update icon" });
+    res.json({ success: false, error: err.message });
   }
 });
 
-// ✅ Update Group Description
+// ----------------------
+// UPDATE DESCRIPTION
+// ----------------------
 router.post("/:id/update-description", (req, res) => {
-  try {
-    const groupId = Number(req.params.id);
-    const { description } = req.body;
-    const group = data.groups.find(g => g.id === groupId);
+  const group = data.groups.find(g => g.id === Number(req.params.id));
+  if (!group) return res.json({ success: false });
 
-    if (!group) return res.json({ success: false, error: "Group not found" });
+  group.description = (req.body.description || "").trim().slice(0, 500);
+  saveData();
 
-    // Update and trim to max 500 chars
-    group.description = description ? description.trim().slice(0, 500) : "";
-    saveData();
-
-    res.json({ success: true });
-  } catch (err) {
-    res.json({ success: false, error: err.message || "Failed to update description" });
-  }
+  res.json({ success: true });
 });
 
-// ✅ Change Group Ownership
+// ----------------------
+// CHANGE OWNER (FIXED)
+// ----------------------
 router.post("/:id/change-owner", (req, res) => {
-  try {
-    const groupId = Number(req.params.id);
-    const { newOwnerId } = req.body;
-    const group = data.groups.find(g => g.id === groupId);
+  const group = data.groups.find(g => g.id === Number(req.params.id));
+  if (!group) return res.json({ success: false });
 
-    if (!group) return res.json({ success: false, error: "Group not found" });
+  const newOwnerId = Number(req.body.newOwnerId);
 
-    // Check if new owner is actually a member
-    const newOwnerMember = group.members.find(m => m.userId === Number(newOwnerId));
-    if (!newOwnerMember) return res.json({ success: false, error: "User is not in this group" });
-
-    // Update ownership
-    const oldOwnerId = group.createdById;  // ✅ save first
-    group.createdById = Number(newOwnerId);
-    group.createdBy = newOwnerMember.username;
-
-    group.members.forEach(m => {
-      if (m.userId === Number(newOwnerId)) m.role = "owner";
-      if (m.userId === oldOwnerId && m.userId !== Number(newOwnerId)) m.role = "member";  // ✅ uses saved value
-    });
-
-    saveData();
-    res.json({ success: true });
-  } catch (err) {
-    res.json({ success: false, error: err.message || "Failed to change owner" });
+  const newOwner = group.members.find(m => m.userId === newOwnerId);
+  if (!newOwner) {
+    return res.json({ success: false, error: "User not in group" });
   }
+
+  const oldOwnerId = group.createdById;
+
+  group.createdById = newOwnerId;
+  group.createdBy = newOwner.username;
+
+  group.members.forEach(m => {
+    if (m.userId === newOwnerId) m.role = "owner";
+    else if (m.userId === oldOwnerId) m.role = "member";
+  });
+
+  saveData();
+  res.json({ success: true });
 });
 
-/** Create ad */
-router.post("/:id/ads/create", upload.single('adImage'), (req, res) => {
-  try {
-    const groupId = Number(req.params.id);
-    const { name, adType, createdById } = req.body;
-
-    const group = data.groups.find(g => g.id === groupId);
-    if (!group) { if (req.file) fs.unlinkSync(req.file.path); return res.json({ success: false, error: "Group not found" }); }
-    if (!req.file) return res.json({ success: false, error: "No image uploaded" });
-    if (!name || name.trim().length < 3) { fs.unlinkSync(req.file.path); return res.json({ success: false, error: "Ad name too short" }); }
-    if (!['728x90', '160x600'].includes(adType)) { fs.unlinkSync(req.file.path); return res.json({ success: false, error: "Invalid ad type" }); }
-
-    if (!data.ads) data.ads = [];
-
-    const newAd = {
-      id: Date.now(),
-      groupId,
-      groupName: group.name,
-      groupIconUrl: group.iconUrl,
-      createdById: Number(createdById),
-      name: name.trim(),
-      adType,
-      imageUrl: "/uploads/groups/" + req.file.filename,
-      createdDate: new Date().toISOString(),
-      active: true
-    };
-
-    data.ads.push(newAd);
-    saveData();
-    res.json({ success: true, adId: newAd.id });
-  } catch (err) {
-    if (req.file) { try { fs.unlinkSync(req.file.path); } catch(e){} }
-    res.json({ success: false, error: err.message || "Server error" });
-  }
-});
-
-/** Get random active ad by type */
-router.get("/ads/random", (req, res) => {
-  try {
-    const { type } = req.query;
-    if (!type) return res.json({ ad: null });
-    const ads = (data.ads || []).filter(a => a.active && a.adType === type);
-    if (ads.length === 0) return res.json({ ad: null });
-    const ad = ads[Math.floor(Math.random() * ads.length)];
-    res.json({ ad });
-  } catch (err) {
-    res.json({ ad: null });
-  }
-});
-
+// ----------------------
+// WALL
+// ----------------------
 router.get("/:id/wall", (req, res) => {
+  const group = data.groups.find(g => g.id === Number(req.params.id));
 
-  try {
+  if (!group) return res.json({ posts: [] });
 
-    const groupId = Number(req.params.id);
-
-    const group = data.groups.find(g => g.id === groupId);
-
-    if (!group) {
-      return res.json({
-        posts: []
-      });
-    }
-
-    if (!group.wallPosts) {
-      group.wallPosts = [];
-    }
-
-    res.json({
-      posts: group.wallPosts
-    });
-
-  } catch(err) {
-
-    console.error("Load Wall Error:", err);
-
-    res.json({
-      posts: []
-    });
-  }
+  res.json({ posts: group.wallPosts || [] });
 });
 
 router.post("/:id/wall/create", (req, res) => {
   try {
-    const g = data.groups.find(x => x.id === +req.params.id);
-    if (!g) return res.json({ success: false, error: "Group not found" });
+    const group = data.groups.find(g => g.id === Number(req.params.id));
+    if (!group) return res.json({ success: false });
 
-    const { userId, username, avatar, message } = req.body;
+    const userId = Number(req.body.userId);
 
-    if (!g.members.some(m => m.userId === +userId))
+    if (!group.members.some(m => m.userId === userId)) {
       return res.json({ success: false, error: "Not a member" });
+    }
 
-    if (!message?.trim())
-      return res.json({ success: false, error: "Message required" });
+    const message = (req.body.message || "").trim();
+    if (!message) return res.json({ success: false });
 
-    if (!g.wallPosts) g.wallPosts = [];
+    if (!group.wallPosts) group.wallPosts = [];
 
-    g.wallPosts.push({
+    group.wallPosts.push({
       id: Date.now(),
-      userId: +userId,
-      username,
-      avatar: avatar || "",
-      message: message.trim().slice(0, 450),
+      userId,
+      username: req.body.username,
+      avatar: req.body.avatar || "",
+      message: message.slice(0, 450),
       createdAt: new Date().toISOString()
     });
 
@@ -364,34 +270,91 @@ router.post("/:id/wall/create", (req, res) => {
     res.json({ success: true });
 
   } catch {
+    res.json({ success: false });
+  }
+});
+
+// ----------------------
+// DELETE WALL POST
+// ----------------------
+router.delete("/:groupId/wall/:postId", (req, res) => {
+  try {
+    const group = data.groups.find(g => g.id === Number(req.params.groupId));
+    if (!group) return res.json({ success: false, error: "Group not found" });
+
+    const userId = Number(req.body.userId || req.query.userId);
+    const postId = Number(req.params.postId);
+
+    const post = group.wallPosts?.find(p => p.id === postId);
+    if (!post) return res.json({ success: false, error: "Post not found" });
+
+    const isOwner = group.createdById === userId;
+    const isAuthor = post.userId === userId;
+
+    if (!isOwner && !isAuthor) {
+      return res.json({ success: false, error: "No permission" });
+    }
+
+    group.wallPosts = group.wallPosts.filter(p => p.id !== postId);
+    saveData();
+
+    res.json({ success: true });
+  } catch {
     res.json({ success: false, error: "Server error" });
   }
 });
 
-router.delete("/:groupId/wall/:postId", (req, res) => {
+// ----------------------
+// ADS
+// ----------------------
+router.post("/:id/ads/create", upload.single('adImage'), (req, res) => {
   try {
-    const g = data.groups.find(x => x.id === +req.params.groupId);
-    if (!g) return res.json({ success: false, error: "Group not found" });
+    const group = data.groups.find(g => g.id === Number(req.params.id));
+    if (!group) return res.json({ success: false });
 
-    const { userId } = req.body;
-    const p = g.wallPosts.find(x => x.id === +req.params.postId);
+    const { name, adType } = req.body;
+    const createdById = Number(req.body.createdById);
 
-    if (!p) return res.json({ success: false, error: "Post not found" });
+    if (!req.file || !name || name.length < 3) {
+      if (req.file) fs.unlinkSync(req.file.path);
+      return res.json({ success: false });
+    }
 
-    const ok =
-      +g.createdById === +userId ||
-      +p.userId === +userId;
+    if (!["728x90", "160x600"].includes(adType)) {
+      fs.unlinkSync(req.file.path);
+      return res.json({ success: false });
+    }
 
-    if (!ok) return res.json({ success: false, error: "No permission" });
+    if (!data.ads) data.ads = [];
 
-    g.wallPosts = g.wallPosts.filter(x => x.id !== +req.params.postId);
+    data.ads.push({
+      id: Date.now(),
+      groupId: group.id,
+      groupName: group.name,
+      groupIconUrl: group.iconUrl,
+      createdById,
+      name,
+      adType,
+      imageUrl: "/uploads/groups/" + req.file.filename,
+      createdDate: new Date().toISOString(),
+      active: true
+    });
 
     saveData();
     res.json({ success: true });
 
-  } catch {
-    res.json({ success: false, error: "Server error" });
+  } catch (err) {
+    res.json({ success: false });
   }
+});
+
+router.get("/ads/random", (req, res) => {
+  const type = req.query.type;
+  const ads = (data.ads || []).filter(a => a.active && a.adType === type);
+
+  if (!ads.length) return res.json({ ad: null });
+
+  res.json({ ad: ads[Math.floor(Math.random() * ads.length)] });
 });
 
 module.exports = router;
