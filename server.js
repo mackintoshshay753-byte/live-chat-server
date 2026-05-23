@@ -9,95 +9,57 @@ const rateLimit = require('express-rate-limit');
 const app = express();
 const server = http.createServer(app);
 
-const PORT = process.env.PORT || 3000;
+const PORT = 3000;
+const ALLOWED_ORIGINS = ["https://idontknowww.neocities.org"];
 
-const ALLOWED_ORIGINS = [
-  "https://idontknowww.neocities.org"
-];
+// Security headers
+app.use(helmet({
+  contentSecurityPolicy: false // Neocities blocks inline CSP
+}));
 
-// -------------------- SECURITY MIDDLEWARE --------------------
-
-// Basic HTTP security headers
-app.use(helmet());
-
-// Safer JSON parsing (limit already good, keep it strict)
-app.use(express.json({ limit: '10kb' }));
-
-// Rate limit (prevents spam / brute force)
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 mins
-  max: 200, // limit each IP
+// Basic rate limiting
+app.use(rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 300,
   standardHeaders: true,
   legacyHeaders: false
-});
+}));
 
-app.use(limiter);
-
-// CORS locked down
+// CORS
 app.use(cors({
-  origin: function (origin, callback) {
-    // allow server-to-server / Postman (no origin)
-    if (!origin) return callback(null, true);
-
-    if (ALLOWED_ORIGINS.includes(origin)) {
-      return callback(null, true);
-    }
-
-    return callback(new Error("CORS blocked"));
-  },
-  credentials: true
+  origin: ALLOWED_ORIGINS,
+  credentials: true,
+  methods: ["GET", "POST"]
 }));
 
-// Prevent directory sniffing / safer static hosting
+// Body parser
+app.use(express.json({ limit: '10kb' }));
+
+// Static files
 app.use(express.static(path.join(__dirname, 'public'), {
-  dotfiles: 'ignore',
-  extensions: ['html'],
-  maxAge: '1d'
+  etag: true,
+  maxAge: '1h',
+  immutable: true
 }));
 
-// -------------------- SOCKET.IO --------------------
-
+// Socket.io
 const io = new Server(server, {
-  cors: {
-    origin: ALLOWED_ORIGINS,
-    credentials: true
-  },
-  transports: ['websocket', 'polling'], // optional stability
-  pingTimeout: 20000,
-  pingInterval: 25000
+  cors: { origin: ALLOWED_ORIGINS, credentials: true }
 });
 
-// -------------------- LOAD SYSTEMS --------------------
-
+// Load data
 const { loadData } = require('./data');
 loadData();
 
+// Sockets
 const setupSockets = require('./sockets');
 setupSockets(io);
 
-// -------------------- ROUTES --------------------
+// Routes
+app.use('/api', require('./routes/api'));
+app.use('/api/friends', require('./routes/friendsapi'));
+app.use('/api/groups', require('./routes/groupsapi'));
+app.use('/api/messages', require('./routes/messagesapi'));
+app.use('/', require('./routes/pages'));
 
-const apiRoutes = require('./routes/api');
-const friendsApiRoutes = require('./routes/friendsapi');
-const groupsApiRoutes = require('./routes/groupsapi');
-const messagesApiRoutes = require('./routes/messagesapi');
-const pageRoutes = require('./routes/pages');
-
-app.use('/api', apiRoutes);
-app.use('/api/friends', friendsApiRoutes);
-app.use('/api/groups', groupsApiRoutes);
-app.use('/api/messages', messagesApiRoutes);
-app.use('/', pageRoutes);
-
-// -------------------- GLOBAL ERROR HANDLER --------------------
-
-app.use((err, req, res, next) => {
-  console.error(err.message);
-  res.status(500).json({ error: 'Internal server error' });
-});
-
-// -------------------- START --------------------
-
-server.listen(PORT, () =>
-  console.log(`✅ Server running on port ${PORT}`)
-);
+server.listen(PORT, () => console.log("✅ Server running on port", PORT));
