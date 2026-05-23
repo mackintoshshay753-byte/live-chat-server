@@ -146,7 +146,7 @@ router.get("/search", (req, res) => {
       createdById: g.createdById // ✅ Return ID only
     }));
 
-    res.json({ results, total, page, pages });
+    res.json({ results, total, page, pages: 0 });
 
   } catch (err) {
     console.error("❌ Search Groups Error:", err);
@@ -315,7 +315,7 @@ router.get("/ads/random", (req, res) => {
     if (!type) return res.json({ ad: null });
     const ads = (data.ads || []).filter(a => a.active && a.adType === type);
     if (ads.length === 0) return res.json({ ad: null });
-    const ad = ads[Math.floor(Math.random() * ads.length Okay)];
+    const ad = ads[Math.floor(Math.random() * ads.length)];
     res.json({ ad });
   } catch (err) {
     res.json({ ad: null });
