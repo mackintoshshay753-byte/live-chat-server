@@ -45,6 +45,7 @@ const upload = multer({
 // ----------------------
 
 // ✅ Create group — owner is added automatically as "owner" role
+// ✅ Create group — owner is added automatically as "owner" role
 router.post("/create", upload.single('groupIcon'), (req, res) => {
   try {
     const { name, description, createdBy, createdById } = req.body;
@@ -63,11 +64,12 @@ router.post("/create", upload.single('groupIcon'), (req, res) => {
       id: data.nextGroupId++,
       name: name.trim(),
       iconUrl: iconUrl,
-      createdById: createdById, // ✅ ONLY SAVE THE ID — NO NAME HERE
+      createdById: createdById, 
+      createdBy: createdBy, // ✅ SAVE NAME HERE TOO FOR OLD GROUPS
       description: description ? description.trim() : "",
       createdDate: new Date().toISOString(),
       members: [
-        { userId: Number(createdById), username: createdBy, role: "owner" }
+        { userId: Number(createdById), username: createdBy, role: "owner" } // ✅ OWNER ALWAYS HERE
       ],
       wallPosts: []
     };
