@@ -4,7 +4,8 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 
-const { data, saveData } = require('../data');
+// ✅ EXACTLY YOUR DATA MODULE
+const { data, saveData } = require('../data/index.js');
 
 // ----------------------
 // IMAGE UPLOAD CONFIG
@@ -39,6 +40,72 @@ const upload = multer({
   limits: { fileSize: 5 * 1024 * 1024 } // 5MB limit
 });
 
+// ==================================================
+// ✅ GLOBAL USERNAME SYNC — MATCHES YOUR DATA STRUCTURE
+// This runs automatically before EVERY request
+// ==================================================
+function syncAllUsernames() {
+  // Build map: userId → currentUsername (from your accounts object)
+  const userMap = new Map();
+  Object.entries(data.accounts || {}).forEach(([userIdStr, userData]) => {
+    const uid = Number(userIdStr);
+    if (userData?.username) {
+      userMap.set(uid, userData.username);
+    }
+  });
+
+  // Update ALL groups
+  if (Array.isArray(data.groups)) {
+    data.groups.forEach(group => {
+      const ownerId = Number(group.createdById);
+
+      // 1. Update owner name
+      if (userMap.has(ownerId)) {
+        group.createdBy = userMap.get(ownerId);
+      }
+
+      // 2. Update every member's username
+      if (Array.isArray(group.members)) {
+        group.members.forEach(member => {
+          const mid = Number(member.userId);
+          if (userMap.has(mid)) {
+            member.username = userMap.get(mid);
+          }
+        });
+      }
+
+      // 3. Update EVERY wall post ever made
+      if (Array.isArray(group.wallPosts)) {
+        group.wallPosts.forEach(post => {
+          const pid = Number(post.userId);
+          if (userMap.has(pid)) {
+            post.username = userMap.get(pid);
+          }
+        });
+      }
+    });
+  }
+
+  // 4. Update all ads
+  if (Array.isArray(data.ads)) {
+    data.ads.forEach(ad => {
+      const aid = Number(ad.createdById);
+      if (userMap.has(aid)) {
+        ad.createdBy = userMap.get(aid);
+      }
+    });
+  }
+
+  // Save all updates permanently
+  saveData();
+}
+
+// Trigger sync before any response
+router.use((req, res, next) => {
+  syncAllUsernames();
+  next();
+});
+
 // ----------------------
 // CREATE GROUP
 // ----------------------
@@ -70,7 +137,7 @@ router.post("/create", upload.single('groupIcon'), (req, res) => {
       iconUrl,
       createdBy,
       createdById,
-      description: description.slice(0, 500), // Limit description length
+      description: description.slice(0, 500),
       createdDate: new Date().toISOString(),
       members: [
         {
@@ -233,7 +300,6 @@ router.post("/:id/update-description", (req, res) => {
 
     const group = data.groups.find(g => g.id === groupId);
     if (!group) return res.json({ success: false, error: "Group not found" });
-
     group.description = (req.body.description || "").trim().slice(0, 500);
     saveData();
 
@@ -258,7 +324,6 @@ router.post("/:id/change-owner", (req, res) => {
 
     const group = data.groups.find(g => g.id === groupId);
     if (!group) return res.json({ success: false, error: "Group not found" });
-
     if (!Array.isArray(group.members)) return res.json({ success: false, error: "Member list missing" });
 
     const newOwner = group.members.find(m => m.userId === newOwnerId);
@@ -317,7 +382,6 @@ router.post("/:id/wall/create", (req, res) => {
 
     const group = data.groups.find(g => g.id === groupId);
     if (!group) return res.json({ success: false, error: "Group not found" });
-
     if (!Array.isArray(group.members)) group.members = [];
     if (!Array.isArray(group.wallPosts)) group.wallPosts = [];
 
