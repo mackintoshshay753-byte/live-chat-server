@@ -3,8 +3,6 @@ const http = require('http');
 const { Server } = require('socket.io');
 const cors = require('cors');
 const path = require('path');
-const helmet = require('helmet');
-const rateLimit = require('express-rate-limit');
 
 const app = express();
 const server = http.createServer(app);
@@ -12,37 +10,13 @@ const server = http.createServer(app);
 const PORT = 3000;
 const ALLOWED_ORIGINS = ["https://idontknowww.neocities.org"];
 
-// Security headers
-app.use(helmet({
-  contentSecurityPolicy: false // Neocities blocks inline CSP
-}));
-
-// Basic rate limiting
-app.use(rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 300,
-  standardHeaders: true,
-  legacyHeaders: false
-}));
-
-// CORS
 app.use(cors({
   origin: ALLOWED_ORIGINS,
-  credentials: true,
-  methods: ["GET", "POST"]
+  credentials: true
 }));
-
-// Body parser
 app.use(express.json({ limit: '10kb' }));
+app.use(express.static(path.join(__dirname, 'public')));
 
-// Static files
-app.use(express.static(path.join(__dirname, 'public'), {
-  etag: true,
-  maxAge: '1h',
-  immutable: true
-}));
-
-// Socket.io
 const io = new Server(server, {
   cors: { origin: ALLOWED_ORIGINS, credentials: true }
 });
@@ -51,15 +25,21 @@ const io = new Server(server, {
 const { loadData } = require('./data');
 loadData();
 
-// Sockets
+// Setup sockets
 const setupSockets = require('./sockets');
 setupSockets(io);
 
-// Routes
-app.use('/api', require('./routes/api'));
-app.use('/api/friends', require('./routes/friendsapi'));
-app.use('/api/groups', require('./routes/groupsapi'));
-app.use('/api/messages', require('./routes/messagesapi'));
-app.use('/', require('./routes/pages'));
+// Load routes
+const apiRoutes = require('./routes/api');
+const friendsApiRoutes = require('./routes/friendsapi');
+const groupsApiRoutes = require('./routes/groupsapi');
+const messagesApiRoutes = require('./routes/messagesapi');
+const pageRoutes = require('./routes/pages');
+
+app.use('/api', apiRoutes);
+app.use('/api/friends', friendsApiRoutes);
+app.use('/api/groups', groupsApiRoutes);
+app.use('/api/messages', messagesApiRoutes);
+app.use('/', pageRoutes);
 
 server.listen(PORT, () => console.log("✅ Server running on port", PORT));
