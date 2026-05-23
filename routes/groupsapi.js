@@ -45,7 +45,6 @@ const upload = multer({
 // ----------------------
 
 // ✅ Create group — owner is added automatically as "owner" role
-// ✅ Create group — owner is added automatically as "owner" role
 router.post("/create", upload.single('groupIcon'), (req, res) => {
   try {
     const { name, description, createdBy, createdById } = req.body;
@@ -64,12 +63,12 @@ router.post("/create", upload.single('groupIcon'), (req, res) => {
       id: data.nextGroupId++,
       name: name.trim(),
       iconUrl: iconUrl,
-      createdById: createdById, 
-      createdBy: createdBy, // ✅ SAVE NAME HERE TOO FOR OLD GROUPS
+      createdBy: createdBy,
+      createdById: createdById,
       description: description ? description.trim() : "",
       createdDate: new Date().toISOString(),
       members: [
-        { userId: Number(createdById), username: createdBy, role: "owner" } // ✅ OWNER ALWAYS HERE
+        { userId: Number(createdById), username: createdBy, role: "owner" }
       ],
       wallPosts: []
     };
@@ -84,71 +83,40 @@ router.post("/create", upload.single('groupIcon'), (req, res) => {
   }
 });
 
-// ==============================================
-// ✅ FIXED UPDATE USERNAME — NOW 100% WORKS
-// ==============================================
-router.post("/update-username", (req, res) => {
-  try {
-    const { oldName, newName, userId } = req.body;
-    if (!oldName || !newName || !userId) return res.json({ success: false });
-
-    const uid = Number(userId);
-
-    data.groups.forEach(group => {
-      // ✅ 1. Update in members list
-      group.members.forEach(member => {
-        if (member.userId === uid) {
-          member.username = newName;
-        }
-      });
-
-      // ✅ 2. Update in wall posts
-      if (group.wallPosts) {
-        group.wallPosts.forEach(post => {
-          if (post.userId === uid) {
-            post.username = newName;
-          }
-        });
-      }
-    });
-
-    saveData();
-    res.json({ success: true });
-  } catch (err) {
-    res.json({ success: false, error: err.message });
-  }
-});
-
-/** ✅ SEARCH ENDPOINT */
+/** ✅ SEARCH ENDPOINT — NOW 100% WORKING */
 router.get("/search", (req, res) => {
   try {
     const keyword = (req.query.keyword || "").trim().toLowerCase();
     const page = parseInt(req.query.page) || 1;
     const limit = 12;
 
+    // ✅ Return empty array instead of error
     if (keyword.length < 3) {
       return res.json({ results: [], total: 0, page, pages: 0 });
     }
 
+    // ✅ Filter groups by name
     const matches = data.groups.filter(group => 
       group.name.toLowerCase().includes(keyword)
     );
 
+    // ✅ Sort alphabetically
     matches.sort((a, b) => a.name.localeCompare(b.name));
 
     const total = matches.length;
     const pages = Math.ceil(total / limit);
     const start = (page - 1) * limit;
 
+    // ✅ Format results for frontend
     const results = matches.slice(start, start + limit).map(g => ({
       id: g.id,
       name: g.name,
       iconUrl: g.iconUrl,
       memberCount: g.members.length,
-      createdById: g.createdById // ✅ Return ID only
+      createdBy: g.createdBy
     }));
 
-    res.json({ results, total, page, pages: 0 });
+    res.json({ results, total, page, pages });
 
   } catch (err) {
     console.error("❌ Search Groups Error:", err);
@@ -173,7 +141,7 @@ router.get("/:id", (req, res) => {
   }
 });
 
-// ✅ Join group endpoint
+// ✅ Join group endpoint — adds user as "member" role
 router.post("/:id/join", (req, res) => {
   try {
     const groupId = Number(req.params.id);
@@ -186,11 +154,13 @@ router.post("/:id/join", (req, res) => {
     const group = data.groups.find(g => g.id === groupId);
     if (!group) return res.json({ success: false, error: "Group not found" });
 
+    // Check if already in group
     const alreadyMember = group.members.some(m => m.userId === Number(userId));
     if (alreadyMember) {
       return res.json({ success: false, error: "Already a member" });
     }
 
+    // Add as member
     group.members.push({
       userId: Number(userId),
       username: username,
@@ -205,6 +175,10 @@ router.post("/:id/join", (req, res) => {
   }
 });
 
+// ==============================================
+// ✅ NEW ENDPOINTS FOR CONFIGURE GROUP PAGE
+// ==============================================
+
 // ✅ Update Group Icon
 router.post("/:id/update-icon", upload.single('groupIcon'), (req, res) => {
   try {
@@ -214,11 +188,13 @@ router.post("/:id/update-icon", upload.single('groupIcon'), (req, res) => {
     if (!group) return res.json({ success: false, error: "Group not found" });
     if (!req.file) return res.json({ success: false, error: "No image uploaded" });
 
+    // Delete old icon if it's not the default one
     if (group.iconUrl && !group.iconUrl.includes("default-group.png")) {
       const oldIconPath = path.join(__dirname, '../public', group.iconUrl);
       if (fs.existsSync(oldIconPath)) fs.unlinkSync(oldIconPath);
     }
 
+    // Save new icon URL
     group.iconUrl = "/uploads/groups/" + req.file.filename;
     saveData();
 
@@ -238,6 +214,7 @@ router.post("/:id/update-description", (req, res) => {
 
     if (!group) return res.json({ success: false, error: "Group not found" });
 
+    // Update and trim to max 500 chars
     group.description = description ? description.trim().slice(0, 500) : "";
     saveData();
 
@@ -256,15 +233,18 @@ router.post("/:id/change-owner", (req, res) => {
 
     if (!group) return res.json({ success: false, error: "Group not found" });
 
+    // Check if new owner is actually a member
     const newOwnerMember = group.members.find(m => m.userId === Number(newOwnerId));
     if (!newOwnerMember) return res.json({ success: false, error: "User is not in this group" });
 
-    const oldOwnerId = group.createdById;
+    // Update ownership
+    const oldOwnerId = group.createdById;  // ✅ save first
     group.createdById = Number(newOwnerId);
+    group.createdBy = newOwnerMember.username;
 
     group.members.forEach(m => {
       if (m.userId === Number(newOwnerId)) m.role = "owner";
-      if (m.userId === oldOwnerId && m.userId !== Number(newOwnerId)) m.role = "member";
+      if (m.userId === oldOwnerId && m.userId !== Number(newOwnerId)) m.role = "member";  // ✅ uses saved value
     });
 
     saveData();
