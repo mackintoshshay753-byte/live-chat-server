@@ -40,19 +40,58 @@ const upload = multer({
 
 // ==================================================
 // GLOBAL USERNAME SYNC
-// Runs before every request — keeps createdBy,
-// member usernames, wall post usernames, and ad
-// creator names in sync with the accounts store.
+// Reads from every possible location your server
+// might store users: data.accounts (object or array),
+// data.users (object or array). Call this any time
+// a username changes, and also via the middleware.
 // ==================================================
-function syncAllUsernames() {
-  // Build map: userId (number) → current username
+function buildUserMap() {
   const userMap = new Map();
-  Object.entries(data.accounts || {}).forEach(([userIdStr, userData]) => {
-    const uid = Number(userIdStr);
-    if (userData?.username) {
-      userMap.set(uid, userData.username);
-    }
-  });
+
+  // data.accounts as plain object { "123": { username, ... } }
+  if (data.accounts && typeof data.accounts === 'object' && !Array.isArray(data.accounts)) {
+    Object.entries(data.accounts).forEach(([key, u]) => {
+      const uid = Number(key);
+      const name = u?.username || u?.name || u?.displayName;
+      if (uid && name) userMap.set(uid, name);
+    });
+  }
+
+  // data.accounts as array [{ id, username }, ...]
+  if (Array.isArray(data.accounts)) {
+    data.accounts.forEach(u => {
+      const uid = Number(u?.id || u?.userId);
+      const name = u?.username || u?.name || u?.displayName;
+      if (uid && name) userMap.set(uid, name);
+    });
+  }
+
+  // data.users as plain object { "123": { username, ... } }
+  if (data.users && typeof data.users === 'object' && !Array.isArray(data.users)) {
+    Object.entries(data.users).forEach(([key, u]) => {
+      const uid = Number(key);
+      const name = u?.username || u?.name || u?.displayName;
+      if (uid && name) userMap.set(uid, name);
+    });
+  }
+
+  // data.users as array [{ id, username }, ...]
+  if (Array.isArray(data.users)) {
+    data.users.forEach(u => {
+      const uid = Number(u?.id || u?.userId);
+      const name = u?.username || u?.name || u?.displayName;
+      if (uid && name) userMap.set(uid, name);
+    });
+  }
+
+  return userMap;
+}
+
+function syncAllUsernames() {
+  const userMap = buildUserMap();
+
+  // Nothing to sync if no accounts found
+  if (userMap.size === 0) return;
 
   if (Array.isArray(data.groups)) {
     data.groups.forEach(group => {
@@ -102,6 +141,88 @@ function syncAllUsernames() {
 router.use((req, res, next) => {
   syncAllUsernames();
   next();
+});
+
+// ----------------------
+// DEBUG ENDPOINT
+// GET /api/groups/debug-accounts
+// Shows what user data the sync can see.
+// Remove this once username sync is working.
+// ----------------------
+router.get("/debug-accounts", (req, res) => {
+  const userMap = buildUserMap();
+  res.json({
+    userMapSize: userMap.size,
+    users: Object.fromEntries(userMap),
+    dataKeys: Object.keys(data),
+    accountsType: Array.isArray(data.accounts) ? 'array' : typeof data.accounts,
+    accountsSample: Array.isArray(data.accounts)
+      ? data.accounts.slice(0, 3)
+      : Object.entries(data.accounts || {}).slice(0, 3).map(([k,v]) => ({ key: k, value: v })),
+    usersType: Array.isArray(data.users) ? 'array' : typeof data.users,
+  });
+});
+
+// ----------------------
+// FORCE SYNC ENDPOINT
+// POST /api/groups/sync
+// Call this from your account settings page
+// right after any username change.
+// Body: { userId, newUsername }
+// ----------------------
+router.post("/sync", (req, res) => {
+  try {
+    const userId = Number(req.body.userId);
+    const newUsername = (req.body.newUsername || "").trim();
+
+    if (!userId || !newUsername) {
+      return res.json({ success: false, error: "userId and newUsername required" });
+    }
+
+    let updated = 0;
+
+    if (Array.isArray(data.groups)) {
+      data.groups.forEach(group => {
+        // Update owner name
+        if (Number(group.createdById) === userId) {
+          group.createdBy = newUsername;
+          updated++;
+        }
+        // Update member entry
+        if (Array.isArray(group.members)) {
+          group.members.forEach(m => {
+            if (Number(m.userId) === userId) {
+              m.username = newUsername;
+              updated++;
+            }
+          });
+        }
+        // Update wall posts
+        if (Array.isArray(group.wallPosts)) {
+          group.wallPosts.forEach(p => {
+            if (Number(p.userId) === userId) {
+              p.username = newUsername;
+              updated++;
+            }
+          });
+        }
+      });
+    }
+
+    if (Array.isArray(data.ads)) {
+      data.ads.forEach(ad => {
+        if (Number(ad.createdById) === userId) {
+          ad.createdBy = newUsername;
+          updated++;
+        }
+      });
+    }
+
+    saveData();
+    res.json({ success: true, updated });
+  } catch (err) {
+    res.json({ success: false, error: err.message });
+  }
 });
 
 // ----------------------
