@@ -48,39 +48,13 @@ const upload = multer({
 function buildUserMap() {
   const userMap = new Map();
 
-  // data.accounts as plain object { "123": { username, ... } }
+  // data.accounts is keyed by USERNAME, with id inside the value:
+  // { "79aux": { id: 1, hash: "...", ... }, "bob": { id: 2, ... } }
+  // So the key IS the current username, u.id is the numeric userId.
   if (data.accounts && typeof data.accounts === 'object' && !Array.isArray(data.accounts)) {
-    Object.entries(data.accounts).forEach(([key, u]) => {
-      const uid = Number(key);
-      const name = u?.username || u?.name || u?.displayName;
-      if (uid && name) userMap.set(uid, name);
-    });
-  }
-
-  // data.accounts as array [{ id, username }, ...]
-  if (Array.isArray(data.accounts)) {
-    data.accounts.forEach(u => {
+    Object.entries(data.accounts).forEach(([username, u]) => {
       const uid = Number(u?.id || u?.userId);
-      const name = u?.username || u?.name || u?.displayName;
-      if (uid && name) userMap.set(uid, name);
-    });
-  }
-
-  // data.users as plain object { "123": { username, ... } }
-  if (data.users && typeof data.users === 'object' && !Array.isArray(data.users)) {
-    Object.entries(data.users).forEach(([key, u]) => {
-      const uid = Number(key);
-      const name = u?.username || u?.name || u?.displayName;
-      if (uid && name) userMap.set(uid, name);
-    });
-  }
-
-  // data.users as array [{ id, username }, ...]
-  if (Array.isArray(data.users)) {
-    data.users.forEach(u => {
-      const uid = Number(u?.id || u?.userId);
-      const name = u?.username || u?.name || u?.displayName;
-      if (uid && name) userMap.set(uid, name);
+      if (uid && username) userMap.set(uid, username);
     });
   }
 
