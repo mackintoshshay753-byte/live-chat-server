@@ -4,7 +4,6 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 
-// ✅ EXACTLY YOUR DATA MODULE
 const { data, saveData } = require('../data/index.js');
 
 // ----------------------
@@ -12,7 +11,6 @@ const { data, saveData } = require('../data/index.js');
 // ----------------------
 const UPLOAD_FOLDER = path.join(__dirname, '../public/uploads/groups');
 
-// Ensure upload folder exists
 if (!fs.existsSync(UPLOAD_FOLDER)) {
   fs.mkdirSync(UPLOAD_FOLDER, { recursive: true });
 }
@@ -37,15 +35,17 @@ const fileFilter = (req, file, cb) => {
 const upload = multer({
   storage,
   fileFilter,
-  limits: { fileSize: 5 * 1024 * 1024 } // 5MB limit
+  limits: { fileSize: 5 * 1024 * 1024 }
 });
 
 // ==================================================
-// ✅ GLOBAL USERNAME SYNC — MATCHES YOUR DATA STRUCTURE
-// This runs automatically before EVERY request
+// GLOBAL USERNAME SYNC
+// Runs before every request — keeps createdBy,
+// member usernames, wall post usernames, and ad
+// creator names in sync with the accounts store.
 // ==================================================
 function syncAllUsernames() {
-  // Build map: userId → currentUsername (from your accounts object)
+  // Build map: userId (number) → current username
   const userMap = new Map();
   Object.entries(data.accounts || {}).forEach(([userIdStr, userData]) => {
     const uid = Number(userIdStr);
@@ -54,12 +54,11 @@ function syncAllUsernames() {
     }
   });
 
-  // Update ALL groups
   if (Array.isArray(data.groups)) {
     data.groups.forEach(group => {
       const ownerId = Number(group.createdById);
 
-      // 1. Update owner name
+      // 1. Update group owner display name
       if (userMap.has(ownerId)) {
         group.createdBy = userMap.get(ownerId);
       }
@@ -74,7 +73,7 @@ function syncAllUsernames() {
         });
       }
 
-      // 3. Update EVERY wall post ever made
+      // 3. Update every wall post's username
       if (Array.isArray(group.wallPosts)) {
         group.wallPosts.forEach(post => {
           const pid = Number(post.userId);
@@ -86,7 +85,7 @@ function syncAllUsernames() {
     });
   }
 
-  // 4. Update all ads
+  // 4. Update ad creator names
   if (Array.isArray(data.ads)) {
     data.ads.forEach(ad => {
       const aid = Number(ad.createdById);
@@ -96,11 +95,10 @@ function syncAllUsernames() {
     });
   }
 
-  // Save all updates permanently
   saveData();
 }
 
-// Trigger sync before any response
+// Run sync before every route handler
 router.use((req, res, next) => {
   syncAllUsernames();
   next();
@@ -113,24 +111,20 @@ router.post("/create", upload.single('groupIcon'), (req, res) => {
   try {
     let { name, description, createdBy, createdById } = req.body;
 
-    // Sanitize inputs
     name = (name || "").trim();
     description = (description || "").trim();
     createdBy = (createdBy || "Unknown").trim();
     createdById = Number(createdById) || 0;
 
-    // Validation
     if (name.length < 3) {
       if (req.file) fs.unlinkSync(req.file.path);
       return res.json({ success: false, error: "Group name must be at least 3 characters long" });
     }
 
-    // Set icon URL
     const iconUrl = req.file
       ? "/uploads/groups/" + req.file.filename
       : "/uploads/groups/default-group.png";
 
-    // Create new group object
     const newGroup = {
       id: data.nextGroupId++,
       name,
@@ -149,7 +143,6 @@ router.post("/create", upload.single('groupIcon'), (req, res) => {
       wallPosts: []
     };
 
-    // Save
     data.groups.push(newGroup);
     saveData();
 
@@ -174,7 +167,6 @@ router.get("/search", (req, res) => {
       return res.json({ results: [], total: 0, page, pages: 0 });
     }
 
-    // Find matching groups
     const matches = data.groups
       .filter(g => (g.name || "").toLowerCase().includes(keyword))
       .sort((a, b) => a.name.localeCompare(b.name));
@@ -272,13 +264,11 @@ router.post("/:id/update-icon", upload.single('groupIcon'), (req, res) => {
       return res.json({ success: false, error: "No image uploaded" });
     }
 
-    // Delete old icon if it's not default
     if (group.iconUrl && !group.iconUrl.includes("default-group.png")) {
       const oldPath = path.join(__dirname, "../public", group.iconUrl);
       if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
     }
 
-    // Update to new icon
     group.iconUrl = "/uploads/groups/" + req.file.filename;
     saveData();
 
@@ -331,11 +321,9 @@ router.post("/:id/change-owner", (req, res) => {
 
     const oldOwnerId = group.createdById;
 
-    // Update owner info
     group.createdById = newOwnerId;
     group.createdBy = newOwner.username;
 
-    // Update roles
     group.members.forEach(m => {
       if (m.userId === newOwnerId) m.role = "owner";
       else if (m.userId === oldOwnerId) m.role = "member";
@@ -385,11 +373,9 @@ router.post("/:id/wall/create", (req, res) => {
     if (!Array.isArray(group.members)) group.members = [];
     if (!Array.isArray(group.wallPosts)) group.wallPosts = [];
 
-    // Check membership
     const isMember = group.members.some(m => m.userId === userId);
     if (!isMember) return res.json({ success: false, error: "You must be a member to post" });
 
-    // Create post
     group.wallPosts.push({
       id: Date.now(),
       userId,
@@ -433,7 +419,6 @@ router.delete("/:groupId/wall/:postId", (req, res) => {
 
     if (!isOwner && !isAuthor) return res.json({ success: false, error: "No permission to delete" });
 
-    // Remove post
     group.wallPosts.splice(postIndex, 1);
     saveData();
 
@@ -453,7 +438,6 @@ router.post("/:id/ads/create", upload.single('adImage'), (req, res) => {
     const { name, adType } = req.body;
     const createdById = Number(req.body.createdById);
 
-    // Validation
     if (isNaN(groupId) || !name?.trim() || name.trim().length < 3 || !adType || isNaN(createdById)) {
       if (req.file) fs.unlinkSync(req.file.path);
       return res.json({ success: false, error: "Missing or invalid fields" });
@@ -474,10 +458,8 @@ router.post("/:id/ads/create", upload.single('adImage'), (req, res) => {
       return res.json({ success: false, error: "Group not found" });
     }
 
-    // Ensure ads array exists
     if (!Array.isArray(data.ads)) data.ads = [];
 
-    // Create ad
     data.ads.push({
       id: Date.now(),
       groupId: group.id,
