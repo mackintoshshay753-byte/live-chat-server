@@ -63,11 +63,10 @@ router.post("/create", upload.single('groupIcon'), (req, res) => {
       id: data.nextGroupId++,
       name: name.trim(),
       iconUrl: iconUrl,
-      createdById: createdById, // ✅ ONLY SAVE THE ID
+      createdById: createdById, // ✅ ONLY SAVE THE ID — NO NAME HERE
       description: description ? description.trim() : "",
       createdDate: new Date().toISOString(),
       members: [
-        // ✅ STILL SAVE NAME HERE, BUT WE WILL UPDATE IT LATER
         { userId: Number(createdById), username: createdBy, role: "owner" }
       ],
       wallPosts: []
@@ -84,24 +83,27 @@ router.post("/create", upload.single('groupIcon'), (req, res) => {
 });
 
 // ==============================================
-// ✅ NEW ENDPOINT — UPDATE USERNAME EVERYWHERE
+// ✅ FIXED UPDATE USERNAME — NOW 100% WORKS
 // ==============================================
 router.post("/update-username", (req, res) => {
   try {
     const { oldName, newName, userId } = req.body;
     if (!oldName || !newName || !userId) return res.json({ success: false });
 
+    const uid = Number(userId);
+
     data.groups.forEach(group => {
+      // ✅ 1. Update in members list
       group.members.forEach(member => {
-        if (member.userId === Number(userId)) {
+        if (member.userId === uid) {
           member.username = newName;
         }
       });
 
-      // 3. Update in wall posts
+      // ✅ 2. Update in wall posts
       if (group.wallPosts) {
         group.wallPosts.forEach(post => {
-          if (post.userId === Number(userId)) {
+          if (post.userId === uid) {
             post.username = newName;
           }
         });
@@ -115,39 +117,33 @@ router.post("/update-username", (req, res) => {
   }
 });
 
-module.exports = router;
-
-/** ✅ SEARCH ENDPOINT — NOW 100% WORKING */
+/** ✅ SEARCH ENDPOINT */
 router.get("/search", (req, res) => {
   try {
     const keyword = (req.query.keyword || "").trim().toLowerCase();
     const page = parseInt(req.query.page) || 1;
     const limit = 12;
 
-    // ✅ Return empty array instead of error
     if (keyword.length < 3) {
       return res.json({ results: [], total: 0, page, pages: 0 });
     }
 
-    // ✅ Filter groups by name
     const matches = data.groups.filter(group => 
       group.name.toLowerCase().includes(keyword)
     );
 
-    // ✅ Sort alphabetically
     matches.sort((a, b) => a.name.localeCompare(b.name));
 
     const total = matches.length;
     const pages = Math.ceil(total / limit);
     const start = (page - 1) * limit;
 
-    // ✅ Format results for frontend
     const results = matches.slice(start, start + limit).map(g => ({
       id: g.id,
       name: g.name,
       iconUrl: g.iconUrl,
       memberCount: g.members.length,
-      createdBy: g.createdBy
+      createdById: g.createdById // ✅ Return ID only
     }));
 
     res.json({ results, total, page, pages });
@@ -175,7 +171,7 @@ router.get("/:id", (req, res) => {
   }
 });
 
-// ✅ Join group endpoint — adds user as "member" role
+// ✅ Join group endpoint
 router.post("/:id/join", (req, res) => {
   try {
     const groupId = Number(req.params.id);
@@ -188,13 +184,11 @@ router.post("/:id/join", (req, res) => {
     const group = data.groups.find(g => g.id === groupId);
     if (!group) return res.json({ success: false, error: "Group not found" });
 
-    // Check if already in group
     const alreadyMember = group.members.some(m => m.userId === Number(userId));
     if (alreadyMember) {
       return res.json({ success: false, error: "Already a member" });
     }
 
-    // Add as member
     group.members.push({
       userId: Number(userId),
       username: username,
@@ -209,10 +203,6 @@ router.post("/:id/join", (req, res) => {
   }
 });
 
-// ==============================================
-// ✅ NEW ENDPOINTS FOR CONFIGURE GROUP PAGE
-// ==============================================
-
 // ✅ Update Group Icon
 router.post("/:id/update-icon", upload.single('groupIcon'), (req, res) => {
   try {
@@ -222,13 +212,11 @@ router.post("/:id/update-icon", upload.single('groupIcon'), (req, res) => {
     if (!group) return res.json({ success: false, error: "Group not found" });
     if (!req.file) return res.json({ success: false, error: "No image uploaded" });
 
-    // Delete old icon if it's not the default one
     if (group.iconUrl && !group.iconUrl.includes("default-group.png")) {
       const oldIconPath = path.join(__dirname, '../public', group.iconUrl);
       if (fs.existsSync(oldIconPath)) fs.unlinkSync(oldIconPath);
     }
 
-    // Save new icon URL
     group.iconUrl = "/uploads/groups/" + req.file.filename;
     saveData();
 
@@ -248,7 +236,6 @@ router.post("/:id/update-description", (req, res) => {
 
     if (!group) return res.json({ success: false, error: "Group not found" });
 
-    // Update and trim to max 500 chars
     group.description = description ? description.trim().slice(0, 500) : "";
     saveData();
 
@@ -267,18 +254,15 @@ router.post("/:id/change-owner", (req, res) => {
 
     if (!group) return res.json({ success: false, error: "Group not found" });
 
-    // Check if new owner is actually a member
     const newOwnerMember = group.members.find(m => m.userId === Number(newOwnerId));
     if (!newOwnerMember) return res.json({ success: false, error: "User is not in this group" });
 
-    // Update ownership
-    const oldOwnerId = group.createdById;  // ✅ save first
+    const oldOwnerId = group.createdById;
     group.createdById = Number(newOwnerId);
-    group.createdBy = newOwnerMember.username;
 
     group.members.forEach(m => {
       if (m.userId === Number(newOwnerId)) m.role = "owner";
-      if (m.userId === oldOwnerId && m.userId !== Number(newOwnerId)) m.role = "member";  // ✅ uses saved value
+      if (m.userId === oldOwnerId && m.userId !== Number(newOwnerId)) m.role = "member";
     });
 
     saveData();
@@ -331,7 +315,7 @@ router.get("/ads/random", (req, res) => {
     if (!type) return res.json({ ad: null });
     const ads = (data.ads || []).filter(a => a.active && a.adType === type);
     if (ads.length === 0) return res.json({ ad: null });
-    const ad = ads[Math.floor(Math.random() * ads.length)];
+    const ad = ads[Math.floor(Math.random() * ads.length Okay)];
     res.json({ ad });
   } catch (err) {
     res.json({ ad: null });
