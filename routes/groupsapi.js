@@ -305,16 +305,34 @@ router.get("/ads/random", (req, res) => {
 });
 
 router.get("/:id/wall", (req, res) => {
+
   try {
-    const g = data.groups.find(x => x.id === +req.params.id);
-    if (!g) return res.json({ posts: [] });
+
+    const groupId = Number(req.params.id);
+
+    const group = data.groups.find(g => g.id === groupId);
+
+    if (!group) {
+      return res.json({
+        posts: []
+      });
+    }
+
+    if (!group.wallPosts) {
+      group.wallPosts = [];
+    }
 
     res.json({
-      posts: g.wallPosts || []
+      posts: group.wallPosts
     });
 
-  } catch {
-    res.json({ posts: [] });
+  } catch(err) {
+
+    console.error("Load Wall Error:", err);
+
+    res.json({
+      posts: []
+    });
   }
 });
 
