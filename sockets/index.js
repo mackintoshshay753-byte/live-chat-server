@@ -2,138 +2,264 @@ const bcrypt = require('bcrypt');
 const { data, saveData } = require('../data');
 const { clean, createProfile } = require('../helpers');
 
-// ✅ This MUST be declared BEFORE exports
-const onlineUsers = new Map(); // username -> socket.id
+// ✅ Track online users: username -> socket.id
+const onlineUsers = new Map();
 
+// ✅ Rate limiting to prevent abuse
+const loginAttempts = new Map(); // username/IP -> { count, lastAttempt }
+const MAX_ATTEMPTS = 5;
+const LOCKOUT_TIME = 15 * 60 * 1000; // 15 minutes
+
+// ✅ Security helpers
+function sanitizeUsername(username) {
+  if (typeof username !== 'string') return '';
+  return clean(username.trim());
+}
+
+function isStrongPassword(password) {
+  // Min 8 chars, at least one letter, one number
+  return typeof password === 'string' &&
+    password.length >= 8 &&
+    /[a-zA-Z]/.test(password) &&
+    /[0-9]/.test(password);
+}
+
+function checkRateLimit(identifier) {
+  const now = Date.now();
+  const record = loginAttempts.get(identifier) || { count: 0, lastAttempt: 0 };
+
+  // Reset if lockout expired
+  if (now - record.lastAttempt > LOCKOUT_TIME) {
+    loginAttempts.set(identifier, { count: 1, lastAttempt: now });
+    return { allowed: true };
+  }
+
+  if (record.count >= MAX_ATTEMPTS) {
+    return { 
+      allowed: false, 
+      message: `Too many attempts. Try again in ${Math.ceil((LOCKOUT_TIME - (now - record.lastAttempt)) / 60000)} minutes.` 
+    };
+  }
+
+  record.count += 1;
+  record.lastAttempt = now;
+  loginAttempts.set(identifier, record);
+  return { allowed: true };
+}
+
+function safeCb(cb, response = {}) {
+  if (typeof cb === 'function') {
+    // Always ensure success flag exists
+    const res = { success: false, ...response };
+    try {
+      cb(res);
+    } catch (err) {
+      console.error('Callback error:', err);
+    }
+  }
+}
+
+// ✅ Main socket setup
 function setupSockets(io) {
   io.on("connection", (socket) => {
-    console.log("🔌 User connected");
+    const clientIp = socket.handshake.address || socket.handshake.headers['x-forwarded-for'] || 'unknown';
+    let currentUser = null; // Track user for this socket connection
 
-    // ==================== LAST ONLINE ====================
+    console.log(`🔌 User connected | IP: ${clientIp}`);
+
+    // ==================== LAST ONLINE & PRESENCE ====================
     socket.on("join", (username) => {
-      const cleanName = clean(username);
-      if (!cleanName) return;
+      try {
+        const cleanName = sanitizeUsername(username);
+        if (!cleanName) return;
 
-      // ✅ Add user to online list
-      onlineUsers.set(cleanName, socket.id);
+        // Remove old entry if exists
+        for (const [user, id] of onlineUsers.entries()) {
+          if (id === socket.id) onlineUsers.delete(user);
+        }
 
-      // Update last seen time
-      if (data.userProfiles[cleanName]) {
-        data.userProfiles[cleanName].lastOnline = new Date().toISOString();
-        saveData();
+        onlineUsers.set(cleanName, socket.id);
+        currentUser = cleanName;
+
+        // Update last seen
+        if (data.userProfiles[cleanName]) {
+          data.userProfiles[cleanName].lastOnline = new Date().toISOString();
+          data.userProfiles[cleanName].isOnline = true;
+          saveData();
+        }
+
+        console.log(`👤 ${cleanName} is online | Total: ${onlineUsers.size}`);
+      } catch (err) {
+        console.error('Join error:', err);
       }
-      console.log(`👤 ${cleanName} is online | Total online: ${onlineUsers.size}`);
     });
 
     socket.on("disconnect", () => {
-      for (const [username, id] of onlineUsers.entries()) {
-        if (id === socket.id) {
-          // ✅ Remove from online list
-          if (data.userProfiles[username]) {
-            data.userProfiles[username].lastOnline = new Date().toISOString();
+      try {
+        if (currentUser) {
+          onlineUsers.delete(currentUser);
+
+          if (data.userProfiles[currentUser]) {
+            data.userProfiles[currentUser].lastOnline = new Date().toISOString();
+            data.userProfiles[currentUser].isOnline = false;
             saveData();
           }
-          onlineUsers.delete(username);
-          console.log(`👤 ${username} went offline | Total online: ${onlineUsers.size}`);
-          break;
+
+          console.log(`👤 ${currentUser} went offline | Total: ${onlineUsers.size}`);
         }
+      } catch (err) {
+        console.error('Disconnect error:', err);
       }
     });
 
-    // ==================== AUTH ====================
+    // ==================== AUTHENTICATION ====================
     socket.on("login", async ({ username, password }, cb) => {
       try {
-        const name = clean(username);
+        const name = sanitizeUsername(username);
+        if (!name || typeof password !== 'string') {
+          return safeCb(cb, { message: "Invalid input" });
+        }
+
+        // Rate limit by username + IP
+        const rateCheck = checkRateLimit(`${name}:${clientIp}`);
+        if (!rateCheck.allowed) {
+          return safeCb(cb, { message: rateCheck.message });
+        }
+
         const lowerName = name.toLowerCase();
         const account = data.accounts[name];
 
-        if (!account || !data.registeredNames[lowerName])
-          return safeCb(cb, { success: false, message: "Account not found" });
+        if (!account || !data.registeredNames[lowerName]) {
+          return safeCb(cb, { message: "Account not found" });
+        }
 
+        // Secure password comparison
         const validPassword = await bcrypt.compare(password, account.hash);
-        if (!validPassword)
-          return safeCb(cb, { success: false, message: "Incorrect password" });
+        if (!validPassword) {
+          return safeCb(cb, { message: "Incorrect username or password" });
+        }
 
-        safeCb(cb, { success: true, username: name, id: account.id, theme: account.theme });
+        // Clear rate limit on success
+        loginAttempts.delete(`${name}:${clientIp}`);
+
+        safeCb(cb, { 
+          success: true, 
+          username: name, 
+          id: account.id, 
+          theme: account.theme || 'light'
+        });
+
       } catch (err) {
         console.error("Login Error:", err);
-        safeCb(cb, { success: false, message: "Server error — try again" });
+        safeCb(cb, { message: "Server error — please try again later" });
       }
     });
 
     socket.on("signup", async ({ username, password }, cb) => {
       try {
-        const name = clean(username);
+        const name = sanitizeUsername(username);
+        if (!name) {
+          return safeCb(cb, { message: "Invalid username format" });
+        }
+
         const lowerName = name.toLowerCase();
 
+        // ✅ Strict validation
         if (name.length < 3 || name.length > 20)
-          return safeCb(cb, { success: false, message: "Username must be 3-20 characters" });
+          return safeCb(cb, { message: "Username must be 3–20 characters" });
         if (/\s/.test(name))
-          return safeCb(cb, { success: false, message: "No spaces allowed" });
+          return safeCb(cb, { message: "Username cannot contain spaces" });
         if (!/^[a-zA-Z0-9_]+$/.test(name))
-          return safeCb(cb, { success: false, message: "Only letters, numbers and underscores" });
-        if (password.length < 8)
-          return safeCb(cb, { success: false, message: "Password must be at least 8 characters" });
+          return safeCb(cb, { message: "Only letters, numbers and underscores allowed" });
         if (data.registeredNames[lowerName])
-          return safeCb(cb, { success: false, message: "Username already taken" });
+          return safeCb(cb, { message: "Username already taken" });
 
+        // ✅ Strong password requirement
+        if (!isStrongPassword(password))
+          return safeCb(cb, { message: "Password must be at least 8 characters and include letters + numbers" });
+
+        // ✅ Create account safely
         const id = data.nextUserId++;
         data.registeredNames[lowerName] = true;
         data.accounts[name] = {
           id,
-          hash: await bcrypt.hash(password, 10),
+          hash: await bcrypt.hash(password, 12), // Higher cost factor = more secure
           joinDate: new Date().toISOString(),
-          theme: "light"
+          theme: "light",
+          verified: false
         };
 
         createProfile(name);
+        
+        // Ensure profile consistency
+        if (!data.userProfiles[name]) {
+          createProfile(name);
+        }
+
         saveData();
 
         safeCb(cb, { success: true, username: name, id });
       } catch (err) {
         console.error("Signup Error:", err);
-        safeCb(cb, { success: false, message: "Server error — try again" });
+        safeCb(cb, { message: "Server error — please try again later" });
       }
     });
 
-    // ==================== OTHER HANDLERS ====================
-    socket.on("save-theme", ({ theme, username }) => {
+    // ==================== USER SETTINGS ====================
+    socket.on("save-theme", ({ theme, username }, cb) => {
       try {
-        const account = data.accounts[username];
-        if (!account) return;
-        account.theme = theme;
-        if (data.userProfiles[username]) data.userProfiles[username].theme = theme;
+        const name = sanitizeUsername(username);
+        if (!name || !['light', 'dark', 'classic'].includes(theme)) {
+          return safeCb(cb, { message: "Invalid theme or user" });
+        }
+
+        if (data.accounts[name]) {
+          data.accounts[name].theme = theme;
+        }
+        if (data.userProfiles[name]) {
+          data.userProfiles[name].theme = theme;
+        }
+
         saveData();
+        safeCb(cb, { success: true });
       } catch (err) {
         console.error("Save Theme Error:", err);
+        safeCb(cb);
       }
     });
 
-    socket.on("change username", ({ oldName, newName }, cb) => {
+    socket.on("change username", async ({ oldName, newName }, cb) => {
       try {
-        const cleanOld = clean(oldName);
-        const cleanNew = clean(newName);
+        const cleanOld = sanitizeUsername(oldName);
+        const cleanNew = sanitizeUsername(newName);
+
+        if (!cleanOld || !cleanNew || cleanOld === cleanNew) {
+          return safeCb(cb, { message: "Invalid name change request" });
+        }
+
         const oldLower = cleanOld.toLowerCase();
         const newLower = cleanNew.toLowerCase();
 
+        // ✅ Validation
         if (cleanNew.length < 3 || cleanNew.length > 20)
-          return safeCb(cb, { success: false, message: "Name must be 3-20 characters" });
+          return safeCb(cb, { message: "New name must be 3–20 characters" });
         if (!/^[a-zA-Z0-9_]+$/.test(cleanNew))
-          return safeCb(cb, { success: false, message: "Only letters, numbers and underscores" });
+          return safeCb(cb, { message: "Only letters, numbers and underscores allowed" });
         if (data.registeredNames[newLower])
-          return safeCb(cb, { success: false, message: "Name already taken" });
-        if (oldLower === newLower)
-          return safeCb(cb, { success: false, message: "Same as current name" });
+          return safeCb(cb, { message: "New username already taken" });
         if (!data.accounts[cleanOld])
-          return safeCb(cb, { success: false, message: "Original user not found" });
+          return safeCb(cb, { message: "Original account not found" });
 
+        // ✅ Atomic update — no partial changes
         delete data.registeredNames[oldLower];
         data.registeredNames[newLower] = true;
 
-        const oldAccountData = data.accounts[cleanOld];
+        // Move account
+        const oldAccount = data.accounts[cleanOld];
         delete data.accounts[cleanOld];
-        data.accounts[cleanNew] = oldAccountData;
+        data.accounts[cleanNew] = oldAccount;
 
+        // Move profile
         const oldProfile = data.userProfiles[cleanOld];
         if (oldProfile) {
           delete data.userProfiles[cleanOld];
@@ -141,57 +267,67 @@ function setupSockets(io) {
           data.userProfiles[cleanNew] = oldProfile;
         }
 
+        // Move ID mapping
         if (data.usernameToId[cleanOld]) {
           data.usernameToId[cleanNew] = data.usernameToId[cleanOld];
           delete data.usernameToId[cleanOld];
         }
 
-        // ✅ Update online status to new name
+        // ✅ Update online status
         if (onlineUsers.has(cleanOld)) {
           onlineUsers.set(cleanNew, onlineUsers.get(cleanOld));
           onlineUsers.delete(cleanOld);
         }
 
         saveData();
+        
+        // Broadcast change
         io.emit("username updated", { oldName: cleanOld, newName: cleanNew });
 
         safeCb(cb, { success: true, newName: cleanNew });
       } catch (err) {
         console.error("Change Username Error:", err);
-        safeCb(cb, { success: false, message: "Server error — try again" });
+        safeCb(cb, { message: "Failed to change username — please try again" });
       }
     });
 
-    socket.on("change password", async ({ username, newPassword }, cb) => {
+    socket.on("change password", async ({ username, newPassword, currentPassword }, cb) => {
       try {
-        const name = clean(username);
+        const name = sanitizeUsername(username);
+        if (!name || typeof newPassword !== 'string') {
+          return safeCb(cb, { message: "Invalid input" });
+        }
+
         const account = data.accounts[name];
-        if (!account)
-          return safeCb(cb, { success: false, message: "Account not found" });
+        if (!account) return safeCb(cb, { message: "Account not found" });
 
-        const sameAsOld = await bcrypt.compare(newPassword, account.hash);
-        if (sameAsOld)
-          return safeCb(cb, { success: false, message: "Password cannot be the same as it already is" });
+        // ✅ Require current password confirmation
+        if (typeof currentPassword !== 'string' || !(await bcrypt.compare(currentPassword, account.hash))) {
+          return safeCb(cb, { message: "Current password is incorrect" });
+        }
 
-        if (newPassword.length < 8)
-          return safeCb(cb, { success: false, message: "Password must be at least 8 characters" });
+        // ✅ Validate new password
+        if (!isStrongPassword(newPassword)) {
+          return safeCb(cb, { message: "New password must be at least 8 characters with letters and numbers" });
+        }
+        if (await bcrypt.compare(newPassword, account.hash)) {
+          return safeCb(cb, { message: "New password cannot be the same as old password" });
+        }
 
-        account.hash = await bcrypt.hash(newPassword, 10);
+        // ✅ Update securely
+        account.hash = await bcrypt.hash(newPassword, 12);
         saveData();
 
         safeCb(cb, { success: true, message: "Password updated successfully" });
       } catch (err) {
-        console.error("CHANGE PASSWORD ERROR:", err);
-        safeCb(cb, { success: false, message: "Something went wrong" });
+        console.error("Change Password Error:", err);
+        safeCb(cb, { message: "Failed to update password" });
       }
     });
+
   });
 }
 
-function safeCb(cb, data) {
-  if (typeof cb === "function") cb(data);
-}
-
-// ==================== ✅ FIXED EXPORTS ====================
+// ✅ Exports
 module.exports = setupSockets;
 module.exports.onlineUsers = onlineUsers;
