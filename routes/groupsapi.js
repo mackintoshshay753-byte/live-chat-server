@@ -63,11 +63,11 @@ router.post("/create", upload.single('groupIcon'), (req, res) => {
       id: data.nextGroupId++,
       name: name.trim(),
       iconUrl: iconUrl,
-      createdBy: createdBy,
-      createdById: createdById,
+      createdById: createdById, // ✅ ONLY SAVE THE ID
       description: description ? description.trim() : "",
       createdDate: new Date().toISOString(),
       members: [
+        // ✅ STILL SAVE NAME HERE, BUT WE WILL UPDATE IT LATER
         { userId: Number(createdById), username: createdBy, role: "owner" }
       ],
       wallPosts: []
@@ -82,6 +82,40 @@ router.post("/create", upload.single('groupIcon'), (req, res) => {
     res.json({ success: false, error: err.message || "Server error" });
   }
 });
+
+// ==============================================
+// ✅ NEW ENDPOINT — UPDATE USERNAME EVERYWHERE
+// ==============================================
+router.post("/update-username", (req, res) => {
+  try {
+    const { oldName, newName, userId } = req.body;
+    if (!oldName || !newName || !userId) return res.json({ success: false });
+
+    data.groups.forEach(group => {
+      group.members.forEach(member => {
+        if (member.userId === Number(userId)) {
+          member.username = newName;
+        }
+      });
+
+      // 3. Update in wall posts
+      if (group.wallPosts) {
+        group.wallPosts.forEach(post => {
+          if (post.userId === Number(userId)) {
+            post.username = newName;
+          }
+        });
+      }
+    });
+
+    saveData();
+    res.json({ success: true });
+  } catch (err) {
+    res.json({ success: false, error: err.message });
+  }
+});
+
+module.exports = router;
 
 /** ✅ SEARCH ENDPOINT — NOW 100% WORKING */
 router.get("/search", (req, res) => {
