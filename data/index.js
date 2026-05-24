@@ -1,27 +1,25 @@
 const fs = require('fs');
 const path = require('path');
 
-// File is INSIDE data folder — clean, not loose
 const DATA_PATH = path.join(__dirname, 'chat-data.json');
 
 const DEFAULT_DATA = {
-  nextUserId: 1,
+  nextUserId:    1,
   registeredNames: {},
-  accounts: {},
-  userProfiles: {},
-  usernameToId: {},
-  friendRequests: {},
-  friends: {},
-  groups: [],
-  nextGroupId: 1,
-  ads: []           // ✅ ADDED — stores all ads
+  accounts:      {},
+  userProfiles:  {},
+  usernameToId:  {},
+  friendRequests:{},
+  friends:       {},
+  groups:        [],
+  nextGroupId:   1,
+  ads:           [],
+  catalog:       [],       // face/item catalog
+  nextCatalogId: 1,        // auto-increment for catalog items
 };
 
 let data = { ...DEFAULT_DATA };
 
-// ----------------------
-// EXACT SAME SAVE/LOAD AS YOUR ORIGINAL
-// ----------------------
 function loadData() {
   if (!fs.existsSync(DATA_PATH)) {
     console.log("📄 No file — creating new");
@@ -29,7 +27,7 @@ function loadData() {
     return;
   }
   try {
-    const raw = fs.readFileSync(DATA_PATH, 'utf8');
+    const raw  = fs.readFileSync(DATA_PATH, 'utf8');
     const loaded = JSON.parse(raw);
     data = { ...DEFAULT_DATA, ...loaded };
     console.log("✅ Data loaded — ID 1 & all users preserved");
