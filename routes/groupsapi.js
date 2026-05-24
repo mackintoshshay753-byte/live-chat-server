@@ -40,17 +40,10 @@ const upload = multer({
 
 // ==================================================
 // GLOBAL USERNAME SYNC
-// Reads from every possible location your server
-// might store users: data.accounts (object or array),
-// data.users (object or array). Call this any time
-// a username changes, and also via the middleware.
 // ==================================================
 function buildUserMap() {
   const userMap = new Map();
 
-  // data.accounts is keyed by USERNAME, with id inside the value:
-  // { "79aux": { id: 1, hash: "...", ... }, "bob": { id: 2, ... } }
-  // So the key IS the current username, u.id is the numeric userId.
   if (data.accounts && typeof data.accounts === 'object' && !Array.isArray(data.accounts)) {
     Object.entries(data.accounts).forEach(([username, u]) => {
       const uid = Number(u?.id || u?.userId);
@@ -63,55 +56,39 @@ function buildUserMap() {
 
 function syncAllUsernames() {
   const userMap = buildUserMap();
-
-  // Nothing to sync if no accounts found
   if (userMap.size === 0) return;
 
   if (Array.isArray(data.groups)) {
     data.groups.forEach(group => {
       const ownerId = Number(group.createdById);
+      if (userMap.has(ownerId)) group.createdBy = userMap.get(ownerId);
 
-      // 1. Update group owner display name
-      if (userMap.has(ownerId)) {
-        group.createdBy = userMap.get(ownerId);
-      }
-
-      // 2. Update every member's username
       if (Array.isArray(group.members)) {
         group.members.forEach(member => {
           const mid = Number(member.userId);
-          if (userMap.has(mid)) {
-            member.username = userMap.get(mid);
-          }
+          if (userMap.has(mid)) member.username = userMap.get(mid);
         });
       }
 
-      // 3. Update every wall post's username
       if (Array.isArray(group.wallPosts)) {
         group.wallPosts.forEach(post => {
           const pid = Number(post.userId);
-          if (userMap.has(pid)) {
-            post.username = userMap.get(pid);
-          }
+          if (userMap.has(pid)) post.username = userMap.get(pid);
         });
       }
     });
   }
 
-  // 4. Update ad creator names
   if (Array.isArray(data.ads)) {
     data.ads.forEach(ad => {
       const aid = Number(ad.createdById);
-      if (userMap.has(aid)) {
-        ad.createdBy = userMap.get(aid);
-      }
+      if (userMap.has(aid)) ad.createdBy = userMap.get(aid);
     });
   }
 
   saveData();
 }
 
-// Run sync before every route handler
 router.use((req, res, next) => {
   syncAllUsernames();
   next();
@@ -119,9 +96,6 @@ router.use((req, res, next) => {
 
 // ----------------------
 // DEBUG ENDPOINT
-// GET /api/groups/debug-accounts
-// Shows what user data the sync can see.
-// Remove this once username sync is working.
 // ----------------------
 router.get("/debug-accounts", (req, res) => {
   const userMap = buildUserMap();
@@ -139,10 +113,6 @@ router.get("/debug-accounts", (req, res) => {
 
 // ----------------------
 // FORCE SYNC ENDPOINT
-// POST /api/groups/sync
-// Call this from your account settings page
-// right after any username change.
-// Body: { userId, newUsername }
 // ----------------------
 router.post("/sync", (req, res) => {
   try {
@@ -157,39 +127,18 @@ router.post("/sync", (req, res) => {
 
     if (Array.isArray(data.groups)) {
       data.groups.forEach(group => {
-        // Update owner name
-        if (Number(group.createdById) === userId) {
-          group.createdBy = newUsername;
-          updated++;
-        }
-        // Update member entry
+        if (Number(group.createdById) === userId) { group.createdBy = newUsername; updated++; }
         if (Array.isArray(group.members)) {
-          group.members.forEach(m => {
-            if (Number(m.userId) === userId) {
-              m.username = newUsername;
-              updated++;
-            }
-          });
+          group.members.forEach(m => { if (Number(m.userId) === userId) { m.username = newUsername; updated++; } });
         }
-        // Update wall posts
         if (Array.isArray(group.wallPosts)) {
-          group.wallPosts.forEach(p => {
-            if (Number(p.userId) === userId) {
-              p.username = newUsername;
-              updated++;
-            }
-          });
+          group.wallPosts.forEach(p => { if (Number(p.userId) === userId) { p.username = newUsername; updated++; } });
         }
       });
     }
 
     if (Array.isArray(data.ads)) {
-      data.ads.forEach(ad => {
-        if (Number(ad.createdById) === userId) {
-          ad.createdBy = newUsername;
-          updated++;
-        }
-      });
+      data.ads.forEach(ad => { if (Number(ad.createdById) === userId) { ad.createdBy = newUsername; updated++; } });
     }
 
     saveData();
@@ -205,7 +154,6 @@ router.post("/sync", (req, res) => {
 router.post("/create", upload.single('groupIcon'), (req, res) => {
   try {
     let { name, description, createdBy, createdById } = req.body;
-
     name = (name || "").trim();
     description = (description || "").trim();
     createdBy = (createdBy || "Unknown").trim();
@@ -228,19 +176,12 @@ router.post("/create", upload.single('groupIcon'), (req, res) => {
       createdById,
       description: description.slice(0, 500),
       createdDate: new Date().toISOString(),
-      members: [
-        {
-          userId: createdById,
-          username: createdBy,
-          role: "owner"
-        }
-      ],
+      members: [{ userId: createdById, username: createdBy, role: "owner" }],
       wallPosts: []
     };
 
     data.groups.push(newGroup);
     saveData();
-
     res.json({ success: true, groupId: newGroup.id });
 
   } catch (err) {
@@ -258,9 +199,7 @@ router.get("/search", (req, res) => {
     const page = Math.max(1, Number(req.query.page) || 1);
     const limit = 12;
 
-    if (keyword.length < 3) {
-      return res.json({ results: [], total: 0, page, pages: 0 });
-    }
+    if (keyword.length < 3) return res.json({ results: [], total: 0, page, pages: 0 });
 
     const matches = data.groups
       .filter(g => (g.name || "").toLowerCase().includes(keyword))
@@ -292,14 +231,10 @@ router.get("/search", (req, res) => {
 // ----------------------
 router.get("/:id", (req, res) => {
   const groupId = Number(req.params.id);
-  if (isNaN(groupId)) {
-    return res.status(400).json({ error: "Invalid group ID" });
-  }
+  if (isNaN(groupId)) return res.status(400).json({ error: "Invalid group ID" });
 
   const group = data.groups.find(g => g.id === groupId);
-  if (!group) {
-    return res.status(404).json({ error: "Group not found" });
-  }
+  if (!group) return res.status(404).json({ error: "Group not found" });
 
   res.json(group);
 });
@@ -318,10 +253,7 @@ router.post("/:id/join", (req, res) => {
     }
 
     const group = data.groups.find(g => g.id === groupId);
-    if (!group) {
-      return res.json({ success: false, error: "Group not found" });
-    }
-
+    if (!group) return res.json({ success: false, error: "Group not found" });
     if (!Array.isArray(group.members)) group.members = [];
 
     if (group.members.some(m => m.userId === userId)) {
@@ -330,7 +262,6 @@ router.post("/:id/join", (req, res) => {
 
     group.members.push({ userId, username: username.trim(), role: "member" });
     saveData();
-
     res.json({ success: true });
 
   } catch (err) {
@@ -355,9 +286,7 @@ router.post("/:id/update-icon", upload.single('groupIcon'), (req, res) => {
       return res.json({ success: false, error: "Group not found" });
     }
 
-    if (!req.file) {
-      return res.json({ success: false, error: "No image uploaded" });
-    }
+    if (!req.file) return res.json({ success: false, error: "No image uploaded" });
 
     if (group.iconUrl && !group.iconUrl.includes("default-group.png")) {
       const oldPath = path.join(__dirname, "../public", group.iconUrl);
@@ -366,7 +295,6 @@ router.post("/:id/update-icon", upload.single('groupIcon'), (req, res) => {
 
     group.iconUrl = "/uploads/groups/" + req.file.filename;
     saveData();
-
     res.json({ success: true, newIconUrl: group.iconUrl });
 
   } catch (err) {
@@ -387,7 +315,6 @@ router.post("/:id/update-description", (req, res) => {
     if (!group) return res.json({ success: false, error: "Group not found" });
     group.description = (req.body.description || "").trim().slice(0, 500);
     saveData();
-
     res.json({ success: true });
 
   } catch (err) {
@@ -403,9 +330,7 @@ router.post("/:id/change-owner", (req, res) => {
     const groupId = Number(req.params.id);
     const newOwnerId = Number(req.body.newOwnerId);
 
-    if (isNaN(groupId) || isNaN(newOwnerId)) {
-      return res.json({ success: false, error: "Invalid ID" });
-    }
+    if (isNaN(groupId) || isNaN(newOwnerId)) return res.json({ success: false, error: "Invalid ID" });
 
     const group = data.groups.find(g => g.id === groupId);
     if (!group) return res.json({ success: false, error: "Group not found" });
@@ -415,7 +340,6 @@ router.post("/:id/change-owner", (req, res) => {
     if (!newOwner) return res.json({ success: false, error: "User is not in this group" });
 
     const oldOwnerId = group.createdById;
-
     group.createdById = newOwnerId;
     group.createdBy = newOwner.username;
 
@@ -516,7 +440,6 @@ router.delete("/:groupId/wall/:postId", (req, res) => {
 
     group.wallPosts.splice(postIndex, 1);
     saveData();
-
     res.json({ success: true });
 
   } catch (err) {
@@ -543,15 +466,10 @@ router.post("/:id/ads/create", upload.single('adImage'), (req, res) => {
       return res.json({ success: false, error: "Invalid ad size" });
     }
 
-    if (!req.file) {
-      return res.json({ success: false, error: "Ad image required" });
-    }
+    if (!req.file) return res.json({ success: false, error: "Ad image required" });
 
     const group = data.groups.find(g => g.id === groupId);
-    if (!group) {
-      fs.unlinkSync(req.file.path);
-      return res.json({ success: false, error: "Group not found" });
-    }
+    if (!group) { fs.unlinkSync(req.file.path); return res.json({ success: false, error: "Group not found" }); }
 
     if (!Array.isArray(data.ads)) data.ads = [];
 
@@ -565,7 +483,9 @@ router.post("/:id/ads/create", upload.single('adImage'), (req, res) => {
       adType,
       imageUrl: "/uploads/groups/" + req.file.filename,
       createdDate: new Date().toISOString(),
-      active: true
+      active: true,
+      impressions: 0, // ✅ Added for stats
+      clicks: 0       // ✅ Added for stats
     });
 
     saveData();
@@ -585,10 +505,7 @@ router.get("/ads/random", (req, res) => {
     const type = req.query.type;
     if (!type) return res.json({ ad: null });
 
-    const ads = Array.isArray(data.ads)
-      ? data.ads.filter(a => a.active && a.adType === type)
-      : [];
-
+    const ads = Array.isArray(data.ads) ? data.ads.filter(a => a.active && a.adType === type) : [];
     if (ads.length === 0) return res.json({ ad: null });
 
     const randomAd = ads[Math.floor(Math.random() * ads.length)];
@@ -596,6 +513,62 @@ router.get("/ads/random", (req, res) => {
 
   } catch (err) {
     res.json({ ad: null, error: "Failed to load ad" });
+  }
+});
+
+// ----------------------
+// ✅ NEW: ADS - GET MY ADS (FOR STATS)
+// ----------------------
+router.get("/ads/mine", (req, res) => {
+  try {
+    const userId = Number(req.query.userId);
+    if (isNaN(userId)) return res.json({ ads: [] });
+
+    const myAds = Array.isArray(data.ads) ? data.ads.filter(a => Number(a.createdById) === userId) : [];
+    res.json({ ads: myAds });
+
+  } catch (err) {
+    res.json({ ads: [], error: "Failed to load your ads" });
+  }
+});
+
+// ----------------------
+// ✅ NEW: ADS - TRACK IMPRESSION
+// ----------------------
+router.post("/ads/:id/impression", (req, res) => {
+  try {
+    const adId = Number(req.params.id);
+    if (isNaN(adId)) return res.sendStatus(400);
+
+    const ad = data.ads.find(a => a.id === adId);
+    if (ad) {
+      ad.impressions = (ad.impressions || 0) + 1;
+      saveData();
+    }
+    res.sendStatus(200);
+
+  } catch (err) {
+    res.sendStatus(500);
+  }
+});
+
+// ----------------------
+// ✅ NEW: ADS - TRACK CLICK
+// ----------------------
+router.post("/ads/:id/click", (req, res) => {
+  try {
+    const adId = Number(req.params.id);
+    if (isNaN(adId)) return res.sendStatus(400);
+
+    const ad = data.ads.find(a => a.id === adId);
+    if (ad) {
+      ad.clicks = (ad.clicks || 0) + 1;
+      saveData();
+    }
+    res.sendStatus(200);
+
+  } catch (err) {
+    res.sendStatus(500);
   }
 });
 
