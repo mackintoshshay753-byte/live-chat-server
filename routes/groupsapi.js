@@ -572,6 +572,18 @@ router.post("/ads/:id/click", (req, res) => {
   }
 });
 
+// Add this to your ads router
+router.post("/ads/:id/toggle", (req, res) => {
+  try {
+    const ad = data.ads.find(a => a.id === Number(req.params.id));
+    if (ad) {
+      ad.active = !ad.active;
+      saveData();
+      res.sendStatus(200);
+    } else res.sendStatus(404);
+  } catch (err) { res.sendStatus(500); }
+});
+
 router.get("/user/:userId", (req, res) => {
   try {
     const userId = Number(req.params.userId);
