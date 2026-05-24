@@ -572,4 +572,21 @@ router.post("/ads/:id/click", (req, res) => {
   }
 });
 
+router.get("/user/:userId", (req, res) => {
+  try {
+    const userId = Number(req.params.userId);
+    if (isNaN(userId)) return res.json({ groups: [] });
+
+    // Find all groups where this user is a member
+    const userGroups = data.groups.filter(group => 
+      Array.isArray(group.members) && group.members.some(m => Number(m.userId) === userId)
+    );
+
+    res.json({ groups: userGroups });
+
+  } catch (err) {
+    res.json({ groups: [], error: "Failed to load user groups" });
+  }
+});
+
 module.exports = router;
