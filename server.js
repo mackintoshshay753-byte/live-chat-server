@@ -34,16 +34,12 @@ const apiRoutes = require('./routes/api');
 const friendsApiRoutes = require('./routes/friendsapi');
 const groupsApiRoutes = require('./routes/groupsapi');
 const messagesApiRoutes = require('./routes/messagesapi');
-const catalogApiRoutes = require('./routes/catalog');
-const avatarApiRoutes = require('./routes/avatar');
 const pageRoutes = require('./routes/pages');
 
 app.use('/api', apiRoutes);
 app.use('/api/friends', friendsApiRoutes);
 app.use('/api/groups', groupsApiRoutes);
 app.use('/api/messages', messagesApiRoutes);
-app.use('/api/catalog', catalogApiRoutes);
-app.use('/api/avatar', avatarApiRoutes);
 app.use('/', pageRoutes);
 
 server.listen(PORT, () => console.log("✅ Server running on port", PORT));
