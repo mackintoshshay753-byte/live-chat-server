@@ -14,8 +14,16 @@ const ALLOWED_ORIGINS = ["https://idontknowww.neocities.org"];
 
 // Security headers
 app.use(helmet({
-  contentSecurityPolicy: false // Neocities blocks inline CSP
+  contentSecurityPolicy: false
 }));
+
+// Remove Helmet CORP/COEP for static files (fixes images)
+app.use((req, res, next) => {
+  res.removeHeader("Cross-Origin-Resource-Policy");
+  res.removeHeader("Cross-Origin-Embedder-Policy");
+  res.removeHeader("Cross-Origin-Opener-Policy");
+  next();
+});
 
 // Basic rate limiting
 app.use(rateLimit({
@@ -32,10 +40,9 @@ app.use(cors({
   methods: ["GET", "POST"]
 }));
 
-// ⭐ REQUIRED FOR IMAGES TO LOAD ON NEOCITIES
+// Allow images to load cross-origin
 app.use((req, res, next) => {
   res.header("Access-Control-Allow-Origin", ALLOWED_ORIGINS[0]);
-  res.header("Access-Control-Allow-Headers", "Content-Type");
   next();
 });
 
