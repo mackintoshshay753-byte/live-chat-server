@@ -32,6 +32,13 @@ app.use(cors({
   methods: ["GET", "POST"]
 }));
 
+// ⭐ REQUIRED FOR IMAGES TO LOAD ON NEOCITIES
+app.use((req, res, next) => {
+  res.header("Access-Control-Allow-Origin", ALLOWED_ORIGINS[0]);
+  res.header("Access-Control-Allow-Headers", "Content-Type");
+  next();
+});
+
 // Body parser
 app.use(express.json({ limit: '10kb' }));
 
