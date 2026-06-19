@@ -10,11 +10,7 @@ const app = express();
 const server = http.createServer(app);
 
 const PORT = 3000;
-// ✅ BOTH WEBSITES ALLOWED HERE
-const ALLOWED_ORIGINS = [
-  "https://idontknowww.neocities.org",
-  "https://orven.neocities.org"
-];
+const ALLOWED_ORIGINS = ["https://idontknowww.neocities.org"];
 
 // Security headers
 app.use(helmet({
@@ -37,26 +33,16 @@ app.use(rateLimit({
   legacyHeaders: false
 }));
 
-// ✅ Updated CORS to accept both domains
+// CORS
 app.use(cors({
-  origin: function (origin, callback) {
-    // Allow requests with no origin (like Postman/curl) or from allowed list
-    if (!origin || ALLOWED_ORIGINS.includes(origin)) {
-      callback(null, true);
-    } else {
-      callback(new Error('Not allowed by CORS'));
-    }
-  },
+  origin: ALLOWED_ORIGINS,
   credentials: true,
   methods: ["GET", "POST"]
 }));
 
-// ✅ Allow images to load from either origin
+// Allow images to load cross-origin
 app.use((req, res, next) => {
-  const origin = req.headers.origin;
-  if (ALLOWED_ORIGINS.includes(origin)) {
-    res.header("Access-Control-Allow-Origin", origin);
-  }
+  res.header("Access-Control-Allow-Origin", ALLOWED_ORIGINS[0]);
   next();
 });
 
@@ -70,12 +56,9 @@ app.use(express.static(path.join(__dirname, 'public'), {
   immutable: true
 }));
 
-// ✅ Socket.io updated for both domains
+// Socket.io
 const io = new Server(server, {
-  cors: {
-    origin: ALLOWED_ORIGINS,
-    credentials: true
-  }
+  cors: { origin: ALLOWED_ORIGINS, credentials: true }
 });
 
 // Load data

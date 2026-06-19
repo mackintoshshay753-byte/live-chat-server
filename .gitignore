@@ -1,4 +1,4 @@
 node_modules
 .DS_Store
 chat-data.json
-.env
+.envdata/chat-data.json
