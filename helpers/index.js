@@ -4,6 +4,7 @@ const toxicity = require('@tensorflow-models/toxicity');
 
 const modelPromise = toxicity.load(0.7);
 
+// ---------------- TEXT NORMALIZER ----------------
 function normalizeText(text) {
   if (!text) return '';
 
@@ -22,6 +23,7 @@ function normalizeText(text) {
     .replace(/(.)\1+/g, '$1');
 }
 
+// ---------------- AI CHECK ----------------
 async function isInappropriate(text) {
   if (!text) return false;
 
@@ -43,10 +45,11 @@ async function isInappropriate(text) {
     );
   } catch (err) {
     console.error("Toxicity error:", err);
-    return false;
+    return false; // never block users if AI fails
   }
 }
 
+// ---------------- CLEAN ----------------
 function clean(input) {
   return sanitizeHtml(String(input || '').trim(), {
     allowedTags: [],
@@ -54,6 +57,7 @@ function clean(input) {
   });
 }
 
+// ---------------- CREATE PROFILE (FIXED FLOW) ----------------
 async function createProfile(username) {
   const cleanedUsername = clean(username);
 
@@ -72,6 +76,7 @@ async function createProfile(username) {
     };
   }
 
+  // AI moderation
   const bad = await isInappropriate(cleanedUsername);
 
   if (bad) {
@@ -81,6 +86,7 @@ async function createProfile(username) {
     };
   }
 
+  // create user
   const profile = {
     id: data.nextUserId++,
     username: cleanedUsername,
@@ -101,6 +107,7 @@ async function createProfile(username) {
   };
 }
 
+// ---------------- GET PROFILE ----------------
 function getProfileById(id) {
   id = Number(id);
   if (!id) return null;
@@ -120,8 +127,7 @@ function getProfileById(id) {
     joinDate: profile.joinDate,
     lastOnline: profile.lastOnline || null,
     theme: profile.theme,
-    bio: profile.bio || "",
-    birthday: profile.birthday || null
+    bio: profile.bio || ""
   };
 }
 

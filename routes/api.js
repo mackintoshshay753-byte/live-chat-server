@@ -5,6 +5,9 @@ const { onlineUsers } = require('../sockets');
 const { getProfileById, clean } = require('../helpers');
 const { data, saveData } = require('../data');
 
+// ----------------------
+// PROFILE
+// ----------------------
 router.get("/profile/:id", (req, res) => {
   try {
     const profile = getProfileById(req.params.id);
@@ -13,8 +16,7 @@ router.get("/profile/:id", (req, res) => {
     }
     res.json({
       ...profile,
-      bio: profile.bio ?? "",
-      birthday: profile.birthday ?? null
+      bio: profile.bio ?? ""
     });
   } catch (err) {
     console.error("Profile API Error:", err);
@@ -40,6 +42,9 @@ router.post("/profile/update-bio", (req, res) => {
   }
 });
 
+// ----------------------
+// SEARCH USERS
+// ----------------------
 router.get("/search/users", (req, res) => {
   try {
     let keyword = clean(req.query.keyword || "");
