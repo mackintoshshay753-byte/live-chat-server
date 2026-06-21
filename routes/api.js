@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 
 const { onlineUsers } = require('../sockets');
-const { clean } = require('../helpers');
+const { getProfileById, clean } = require('../helpers');
 const { data, saveData } = require('../data');
 
 // ----------------------
@@ -10,41 +10,32 @@ const { data, saveData } = require('../data');
 // ----------------------
 router.get("/profile/:id", (req, res) => {
   try {
-    const profile = data.userProfiles[req.params.id]; // ✅ FIX: no helper
-
+    const profile = getProfileById(req.params.id);
     if (!profile) {
       return res.status(404).json({ error: "User not found" });
     }
-
     res.json({
       ...profile,
-      bio: profile.bio ?? "",
-      birthday: profile.birthday ?? null // ✅ FIX: include birthday
+      bio: profile.bio ?? ""
     });
-
   } catch (err) {
     console.error("Profile API Error:", err);
     res.status(500).json({ error: "Server error" });
   }
 });
 
-// ----------------------
-// UPDATE BIO
-// ----------------------
 router.post("/profile/update-bio", (req, res) => {
   try {
     const { userId, bio } = req.body;
     if (!userId) return res.json({ success: false });
 
-    const profile = data.userProfiles[userId]; // ✅ FIX: direct lookup
-
+    const profile = Object.values(data.userProfiles).find(p => p.id === Number(userId));
     if (!profile) return res.json({ success: false });
 
-    profile.bio = (bio || "").trim().slice(0, 500);
+    profile.bio = bio.trim().slice(0, 500);
     saveData();
 
     res.json({ success: true });
-
   } catch (err) {
     console.error("Update Bio API Error:", err);
     res.json({ success: false });
@@ -69,16 +60,13 @@ router.get("/search/users", (req, res) => {
 
     Object.entries(data.accounts).forEach(([username, info]) => {
       if (username.toLowerCase().includes(keyword)) {
-
-        // ❌ FIX: profile lookup was wrong (username key)
-        const profile = data.userProfiles[info.id] || {};
-
+        const profile = data.userProfiles[username] || {};
         const isOnline = onlineUsers.has(username);
 
         matches.push({
           id: info.id,
-          username,
-          isOnline,
+          username: username,
+          isOnline: isOnline,
           lastOnline: profile.lastOnline || null
         });
       }
@@ -97,7 +85,6 @@ router.get("/search/users", (req, res) => {
       page,
       pages
     });
-
   } catch (err) {
     console.error("Search API Error:", err);
     res.status(500).json({ error: "Server error" });
