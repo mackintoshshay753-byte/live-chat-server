@@ -179,7 +179,11 @@ function setupSockets(io) {
 
         data.userProfiles[id] = {
           username: name,
-          birthday: birthday || null,
+          birthday: {
+            month: birthday?.month || null,
+            day: birthday?.day || null,
+            year: birthday?.year || null
+          },
           createdAt: Date.now(),
           isOnline: false,
           lastOnline: null
