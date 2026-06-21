@@ -156,54 +156,64 @@ function setupSockets(io) {
     });
 
     socket.on("signup", async ({ username, password }, cb) => {
-      try {
-        const name = sanitizeUsername(username);
-        if (!name) {
-          return safeCb(cb, { message: "Invalid username format" });
-        }
+  try {
+    const name = sanitizeUsername(username);
+    if (!name) {
+      return safeCb(cb, { message: "Invalid username format" });
+    }
 
-        const lowerName = name.toLowerCase();
+    const lowerName = name.toLowerCase();
 
-        // ✅ Strict validation
-        if (name.length < 3 || name.length > 20)
-          return safeCb(cb, { message: "Username must be 3–20 characters" });
-        if (/\s/.test(name))
-          return safeCb(cb, { message: "Username cannot contain spaces" });
-        if (!/^[a-zA-Z0-9_]+$/.test(name))
-          return safeCb(cb, { message: "Only letters, numbers and underscores allowed" });
-        if (data.registeredNames[lowerName])
-          return safeCb(cb, { message: "Username already taken" });
+    // Frontend-like validation
+    if (name.length < 3 || name.length > 20)
+      return safeCb(cb, { message: "Username must be 3–20 characters" });
+    if (/\s/.test(name))
+      return safeCb(cb, { message: "Username cannot contain spaces" });
+    if (!/^[a-zA-Z0-9_]+$/.test(name))
+      return safeCb(cb, { message: "Only letters, numbers and underscores allowed" });
+    if (data.registeredNames[lowerName])
+      return safeCb(cb, { message: "Username already taken" });
 
-        // ✅ Strong password requirement
-        if (!isStrongPassword(password))
-          return safeCb(cb, { message: "Password must be at least 8 characters and include letters + numbers" });
+    if (!isStrongPassword(password))
+      return safeCb(cb, { message: "Password must be at least 8 characters and include letters + numbers" });
 
-        // ✅ Create account safely
-        const id = data.nextUserId++;
-        data.registeredNames[lowerName] = true;
-        data.accounts[name] = {
-          id,
-          hash: await bcrypt.hash(password, 12), // Higher cost factor = more secure
-          joinDate: new Date().toISOString(),
-          theme: "light",
-          verified: false
-        };
+    // ====================== KEY FIX ======================
+    // Check moderation BEFORE creating account
+    const profileResult = await createProfile(name);
+    
+    if (!profileResult.success) {
+      return safeCb(cb, { 
+        success: false, 
+        message: profileResult.message || "Username is not appropriate" 
+      });
+    }
+    // ====================================================
 
-        createProfile(name);
-        
-        // Ensure profile consistency
-        if (!data.userProfiles[name]) {
-          createProfile(name);
-        }
+    // Now safe to create account
+    const id = profileResult.user.id; // Use the ID from createProfile
 
-        saveData();
+    data.registeredNames[lowerName] = true;
+    data.accounts[name] = {
+      id,
+      hash: await bcrypt.hash(password, 12),
+      joinDate: new Date().toISOString(),
+      theme: "light",
+      verified: false
+    };
 
-        safeCb(cb, { success: true, username: name, id });
-      } catch (err) {
-        console.error("Signup Error:", err);
-        safeCb(cb, { message: "Server error — please try again later" });
-      }
+    saveData();
+
+    safeCb(cb, { 
+      success: true, 
+      username: name, 
+      id 
     });
+
+  } catch (err) {
+    console.error("Signup Error:", err);
+    safeCb(cb, { message: "Server error — please try again later" });
+  }
+});
 
     // ==================== USER SETTINGS ====================
     socket.on("save-theme", ({ theme, username }, cb) => {
