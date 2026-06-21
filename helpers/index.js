@@ -2,8 +2,7 @@ const sanitizeHtml = require('sanitize-html');
 const { data, saveData } = require('../data');
 const toxicity = require('@tensorflow-models/toxicity');
 
-// Load once (IMPORTANT: keep this global)
-const modelPromise = toxicity.load(0.9); // slightly stricter
+const modelPromise = toxicity.load(0.9);
 
 function normalizeText(text) {
   if (!text) return '';
@@ -23,7 +22,6 @@ function normalizeText(text) {
     .replace(/(.)\1+/g, '$1');
 }
 
-// ✅ AI toxicity check (FIXED PROPERLY)
 async function isInappropriate(text) {
   if (!text) return false;
 
@@ -32,7 +30,6 @@ async function isInappropriate(text) {
 
     const norm = normalizeText(text);
 
-    // 🔥 FIX: give context sentences (this is critical)
     const inputs = [
       `username is ${norm}`,
       `this is a username: ${norm}`
@@ -45,9 +42,8 @@ async function isInappropriate(text) {
     );
 
   } catch (err) {
-    // ❗ Fail-safe: if AI breaks, DO NOT block signup
-    console.error("Toxicity model error:", err);
-    return false;
+    console.error("AI moderation error:", err);
+    return false; // fail safe
   }
 }
 
@@ -58,21 +54,22 @@ function clean(input) {
   });
 }
 
-// ✅ FIXED: async + safer logic
+// ✅ IMPORTANT: NEVER throw for user input
 async function createProfile(username) {
   const cleanedUsername = clean(username);
 
   if (!cleanedUsername) {
-    throw new Error('Username required');
+    return { error: "Username required" };
   }
 
   if (data.userProfiles[cleanedUsername]) {
     return data.userProfiles[cleanedUsername];
   }
 
-  // AI check
-  if (await isInappropriate(cleanedUsername)) {
-    throw new Error('Username contains inappropriate content');
+  const bad = await isInappropriate(cleanedUsername);
+
+  if (bad) {
+    return { error: "Username contains inappropriate content" };
   }
 
   const profile = {
