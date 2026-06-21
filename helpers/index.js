@@ -1,28 +1,67 @@
 const sanitizeHtml = require('sanitize-html');
 const { data, saveData } = require('../data');
+const toxicity = require('@tensorflow-models/toxicity');
+
+let modelPromise = toxicity.load(0.8); // load once
+
+function normalizeText(text) {
+  if (!text) return '';
+  const CHAR_MAP = { '0':'o','1':'i','3':'e','4':'a','5':'s','$':'s','@':'a','!':'i' };
+
+  return text.toLowerCase()
+    .trim()
+    .split('')
+    .map(c => CHAR_MAP[c] || c)
+    .join('')
+    .replace(/[^a-z]/g, '')
+    .replace(/(.)\1+/g, '$1');
+}
+
+// AI toxicity check
+async function isInappropriate(text) {
+  const model = await modelPromise;
+  if (!text) return false;
+
+  const norm = normalizeText(text);
+
+  const results = await model.classify([norm]);
+
+  return results.some(pred =>
+    pred.results.some(r => r.match === true)
+  );
+}
 
 function clean(input) {
-  return sanitizeHtml(String(input || '').trim(), { 
-    allowedTags: [], 
-    allowedAttributes: {} 
+  return sanitizeHtml(String(input || '').trim(), {
+    allowedTags: [],
+    allowedAttributes: {}
   });
 }
 
-function createProfile(username) {
-  if (data.userProfiles[username]) return data.userProfiles[username];
+// FIX: must be async
+async function createProfile(username) {
+  const cleanedUsername = clean(username);
 
-  // Use the ID that was already assigned in signup
+  if (data.userProfiles[cleanedUsername]) {
+    return data.userProfiles[cleanedUsername];
+  }
+
+  if (await isInappropriate(cleanedUsername)) {
+    throw new Error('Username contains inappropriate content');
+  }
+
   const profile = {
-    id: data.nextUserId - 1,        // Important fix
-    username,
+    id: data.nextUserId++,
+    username: cleanedUsername,
     joinDate: new Date().toISOString(),
     lastOnline: new Date().toISOString(),
     theme: "light",
-    bio: "" // ✅ ADDED: empty bio by default for new users
+    bio: ""
   };
 
-  data.userProfiles[username] = profile;
-  data.usernameToId[username] = profile.id;
+  data.userProfiles[cleanedUsername] = profile;
+  data.usernameToId[cleanedUsername] = profile.id;
+
   saveData();
   return profile;
 }
@@ -31,13 +70,14 @@ function getProfileById(id) {
   id = Number(id);
   if (!id) return null;
 
-  const profile = Object.values(data.userProfiles).find(p => Number(p.id) === id);
+  const profile = Object.values(data.userProfiles)
+    .find(p => Number(p.id) === id);
+
   if (!profile) return null;
 
-  // Get latest username in case it changed
-  const currentUsername = Object.keys(data.accounts).find(
-    name => data.accounts[name].id === profile.id
-  );
+  const currentUsername =
+    Object.keys(data.userProfiles)
+      .find(name => data.userProfiles[name].id === profile.id);
 
   return {
     id: profile.id,
@@ -45,8 +85,13 @@ function getProfileById(id) {
     joinDate: profile.joinDate,
     lastOnline: profile.lastOnline || null,
     theme: profile.theme,
-    bio: profile.bio || "" // ✅ ADDED: return bio value
+    bio: profile.bio || ""
   };
 }
 
-module.exports = { clean, createProfile, getProfileById };
+module.exports = {
+  clean,
+  createProfile,
+  getProfileById,
+  isInappropriate
+};
