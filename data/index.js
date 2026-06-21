@@ -1,7 +1,6 @@
 const fs = require('fs');
 const path = require('path');
 
-// File is INSIDE data folder — clean, not loose
 const DATA_PATH = path.join(__dirname, 'chat-data.json');
 
 const DEFAULT_DATA = {
@@ -14,14 +13,12 @@ const DEFAULT_DATA = {
   friends: {},
   groups: [],
   nextGroupId: 1,
-  ads: []           // ✅ ADDED — stores all ads
+  ads: [],
+  birthdays: {}
 };
 
 let data = { ...DEFAULT_DATA };
 
-// ----------------------
-// EXACT SAME SAVE/LOAD AS YOUR ORIGINAL
-// ----------------------
 function loadData() {
   if (!fs.existsSync(DATA_PATH)) {
     console.log("📄 No file — creating new");
