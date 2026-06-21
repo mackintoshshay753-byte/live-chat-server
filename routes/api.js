@@ -43,6 +43,27 @@ router.post("/profile/update-bio", (req, res) => {
 });
 
 // ----------------------
+// PROFILE
+// ----------------------
+router.get("/profile/:id", (req, res) => {
+  try {
+    const profile = getProfileById(req.params.id);
+    if (!profile) {
+      return res.status(404).json({ error: "User not found" });
+    }
+    res.json({
+      ...profile,
+      bio: profile.bio ?? "",
+      // ✅ NOW BIRTHDAY IS INCLUDED
+      birthday: profile.birthday ?? null
+    });
+  } catch (err) {
+    console.error("Profile API Error:", err);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+// ----------------------
 // SEARCH USERS
 // ----------------------
 router.get("/search/users", (req, res) => {

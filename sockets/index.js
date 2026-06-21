@@ -190,9 +190,10 @@ function setupSockets(io) {
       verified: false
     };
 
-    data.userProfiles[id] = {
+    // ✅ SAVE BIRTHDAY EXACTLY AS ENTERED
+    data.userProfiles[name] = {
       username: name,
-      birthday: birthday || null,
+      birthday: birthday || null, // <-- This was already here, good
       createdAt: Date.now(),
       isOnline: false,
       lastOnline: null

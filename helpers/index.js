@@ -108,6 +108,7 @@ async function createProfile(username) {
 }
 
 // ---------------- GET PROFILE ----------------
+// ---------------- GET PROFILE ----------------
 function getProfileById(id) {
   id = Number(id);
   if (!id) return null;
@@ -127,7 +128,8 @@ function getProfileById(id) {
     joinDate: profile.joinDate,
     lastOnline: profile.lastOnline || null,
     theme: profile.theme,
-    bio: profile.bio || ""
+    bio: profile.bio || "",
+    birthday: profile.birthday || null
   };
 }
 
