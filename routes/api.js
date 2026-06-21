@@ -16,7 +16,8 @@ router.get("/profile/:id", (req, res) => {
     }
     res.json({
       ...profile,
-      bio: profile.bio ?? ""
+      bio: profile.bio ?? "",
+      birthday: profile.birthday ?? null
     });
   } catch (err) {
     console.error("Profile API Error:", err);
@@ -39,27 +40,6 @@ router.post("/profile/update-bio", (req, res) => {
   } catch (err) {
     console.error("Update Bio API Error:", err);
     res.json({ success: false });
-  }
-});
-
-// ----------------------
-// PROFILE
-// ----------------------
-router.get("/profile/:id", (req, res) => {
-  try {
-    const profile = getProfileById(req.params.id);
-    if (!profile) {
-      return res.status(404).json({ error: "User not found" });
-    }
-    res.json({
-      ...profile,
-      bio: profile.bio ?? "",
-      // ✅ NOW BIRTHDAY IS INCLUDED
-      birthday: profile.birthday ?? null
-    });
-  } catch (err) {
-    console.error("Profile API Error:", err);
-    res.status(500).json({ error: "Server error" });
   }
 });
 
