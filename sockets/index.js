@@ -159,7 +159,7 @@ function setupSockets(io) {
       }
     });
 
-    socket.on("signup", async ({ username, password, birthday }, cb) => {
+    socket.on("signup", async ({ username, password }, cb) => {
   try {
     const name = sanitizeUsername(username);
     if (!name) return safeCb(cb, { message: "Invalid username format" });
@@ -192,7 +192,6 @@ function setupSockets(io) {
 
     data.userProfiles[id] = {
       username: name,
-      birthday: birthday || null,
       createdAt: Date.now(),
       isOnline: false,
       lastOnline: null
