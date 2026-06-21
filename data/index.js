@@ -14,7 +14,8 @@ const DEFAULT_DATA = {
   friends: {},
   groups: [],
   nextGroupId: 1,
-  ads: []           // ✅ ADDED — stores all ads
+  ads: [],
+  birthdays: {}
 };
 
 let data = { ...DEFAULT_DATA };

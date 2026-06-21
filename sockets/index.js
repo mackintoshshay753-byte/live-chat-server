@@ -81,10 +81,11 @@ function setupSockets(io) {
         onlineUsers.set(cleanName, socket.id);
         currentUser = cleanName;
 
-        // Update last seen
-        if (data.userProfiles[cleanName]) {
-          data.userProfiles[cleanName].lastOnline = new Date().toISOString();
-          data.userProfiles[cleanName].isOnline = true;
+        const account = data.accounts[cleanName];
+
+        if (account && data.userProfiles[account.id]) {
+          data.userProfiles[account.id].lastOnline = new Date().toISOString();
+          data.userProfiles[account.id].isOnline = true;
           saveData();
         }
 
@@ -99,10 +100,13 @@ function setupSockets(io) {
         if (currentUser) {
           onlineUsers.delete(currentUser);
 
-          if (data.userProfiles[currentUser]) {
-            data.userProfiles[currentUser].lastOnline = new Date().toISOString();
-            data.userProfiles[currentUser].isOnline = false;
-            saveData();
+          if (currentUser) {
+            const account = data.accounts[currentUser];
+            if (account && data.userProfiles[account.id]) {
+              data.userProfiles[account.id].lastOnline = new Date().toISOString();
+              data.userProfiles[account.id].isOnline = false;
+              saveData();
+            }
           }
 
           console.log(`👤 ${currentUser} went offline | Total: ${onlineUsers.size}`);
@@ -155,44 +159,29 @@ function setupSockets(io) {
       }
     });
 
-    socket.on("signup", async ({ username, password }, cb) => {
+    socket.on("signup", async ({ username, password, birthday }, cb) => {
   try {
     const name = sanitizeUsername(username);
-    if (!name) {
+    if (!name) return safeCb(cb, { message: "Invalid username format" });
+
+    const lower = name.toLowerCase();
+
+    if (name.length < 3 || name.length > 20 || /\s/.test(name) || !/^[a-zA-Z0-9_]+$/.test(name))
       return safeCb(cb, { message: "Invalid username format" });
-    }
 
-    const lowerName = name.toLowerCase();
-
-    // Frontend-like validation
-    if (name.length < 3 || name.length > 20)
-      return safeCb(cb, { message: "Username must be 3–20 characters" });
-    if (/\s/.test(name))
-      return safeCb(cb, { message: "Username cannot contain spaces" });
-    if (!/^[a-zA-Z0-9_]+$/.test(name))
-      return safeCb(cb, { message: "Only letters, numbers and underscores allowed" });
-    if (data.registeredNames[lowerName])
+    if (data.registeredNames[lower])
       return safeCb(cb, { message: "Username already taken" });
 
     if (!isStrongPassword(password))
-      return safeCb(cb, { message: "Password must be at least 8 characters and include letters + numbers" });
+      return safeCb(cb, { message: "Password must be 8+ chars with letters + numbers" });
 
-    // ====================== KEY FIX ======================
-    // Check moderation BEFORE creating account
-    const profileResult = await createProfile(name);
-    
-    if (!profileResult.success) {
-      return safeCb(cb, { 
-        success: false, 
-        message: profileResult.message || "Username is not appropriate" 
-      });
-    }
-    // ====================================================
+    const r = await createProfile(name);
+    if (!r.success)
+      return safeCb(cb, { success: false, message: r.message || "Username is not appropriate" });
 
-    // Now safe to create account
-    const id = profileResult.user.id; // Use the ID from createProfile
+    const id = r.user.id;
 
-    data.registeredNames[lowerName] = true;
+    data.registeredNames[lower] = true;
     data.accounts[name] = {
       id,
       hash: await bcrypt.hash(password, 12),
@@ -201,17 +190,19 @@ function setupSockets(io) {
       verified: false
     };
 
+    data.userProfiles[id] = {
+      username: name,
+      birthday: birthday || null,
+      createdAt: Date.now(),
+      isOnline: false,
+      lastOnline: null
+    };
+
     saveData();
-
-    safeCb(cb, { 
-      success: true, 
-      username: name, 
-      id 
-    });
-
-  } catch (err) {
-    console.error("Signup Error:", err);
-    safeCb(cb, { message: "Server error — please try again later" });
+    safeCb(cb, { success: true, username: name, id });
+  } catch (e) {
+    console.error(e);
+    safeCb(cb, { message: "Server error" });
   }
 });
 
