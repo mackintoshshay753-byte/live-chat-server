@@ -4,12 +4,13 @@ const toxicity = require('@tensorflow-models/toxicity');
 
 const modelPromise = toxicity.load(0.9);
 
+// ---------------- TEXT NORMALIZER ----------------
 function normalizeText(text) {
   if (!text) return '';
 
   const CHAR_MAP = {
-    '0':'o','1':'i','3':'e','4':'a','5':'s',
-    '$':'s','@':'a','!':'i'
+    '0': 'o', '1': 'i', '3': 'e', '4': 'a', '5': 's',
+    '$': 's', '@': 'a', '!': 'i'
   };
 
   return text
@@ -22,6 +23,7 @@ function normalizeText(text) {
     .replace(/(.)\1+/g, '$1');
 }
 
+// ---------------- AI CHECK ----------------
 async function isInappropriate(text) {
   if (!text) return false;
 
@@ -31,6 +33,7 @@ async function isInappropriate(text) {
     const norm = normalizeText(text);
 
     const inputs = [
+      norm,
       `username is ${norm}`,
       `this is a username: ${norm}`
     ];
@@ -38,15 +41,15 @@ async function isInappropriate(text) {
     const results = await model.classify(inputs);
 
     return results.some(pred =>
-      pred.results.some(r => r.match === true)
+      pred.results?.some(r => r.match === true)
     );
-
   } catch (err) {
-    console.error("AI moderation error:", err);
-    return false; // fail safe
+    console.error("Toxicity error:", err);
+    return false; // never block users if AI fails
   }
 }
 
+// ---------------- CLEAN ----------------
 function clean(input) {
   return sanitizeHtml(String(input || '').trim(), {
     allowedTags: [],
@@ -54,24 +57,36 @@ function clean(input) {
   });
 }
 
-// ✅ IMPORTANT: NEVER throw for user input
+// ---------------- CREATE PROFILE (FIXED FLOW) ----------------
 async function createProfile(username) {
   const cleanedUsername = clean(username);
 
   if (!cleanedUsername) {
-    return { error: "Username required" };
+    return { success: false, message: "Username required" };
+  }
+
+  if (cleanedUsername.length < 3 || cleanedUsername.length > 20) {
+    return { success: false, message: "Username must be 3–20 characters" };
   }
 
   if (data.userProfiles[cleanedUsername]) {
-    return data.userProfiles[cleanedUsername];
+    return {
+      success: false,
+      message: "Username already exists"
+    };
   }
 
+  // AI moderation
   const bad = await isInappropriate(cleanedUsername);
 
   if (bad) {
-    return { error: "Username contains inappropriate content" };
+    return {
+      success: false,
+      message: "Username is not appropriate"
+    };
   }
 
+  // create user
   const profile = {
     id: data.nextUserId++,
     username: cleanedUsername,
@@ -85,9 +100,14 @@ async function createProfile(username) {
   data.usernameToId[cleanedUsername] = profile.id;
 
   saveData();
-  return profile;
+
+  return {
+    success: true,
+    user: profile
+  };
 }
 
+// ---------------- GET PROFILE ----------------
 function getProfileById(id) {
   id = Number(id);
   if (!id) return null;
