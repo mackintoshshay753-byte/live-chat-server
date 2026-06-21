@@ -2,7 +2,7 @@ const sanitizeHtml = require('sanitize-html');
 const { data, saveData } = require('../data');
 const toxicity = require('@tensorflow-models/toxicity');
 
-const modelPromise = toxicity.load(0.9);
+const modelPromise = toxicity.load(0.5);
 
 // ---------------- TEXT NORMALIZER ----------------
 function normalizeText(text) {
