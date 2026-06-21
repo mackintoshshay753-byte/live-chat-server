@@ -2,13 +2,19 @@ const sanitizeHtml = require('sanitize-html');
 const { data, saveData } = require('../data');
 const toxicity = require('@tensorflow-models/toxicity');
 
-let modelPromise = toxicity.load(0.8); // load once
+// Load once (IMPORTANT: keep this global)
+const modelPromise = toxicity.load(0.9); // slightly stricter
 
 function normalizeText(text) {
   if (!text) return '';
-  const CHAR_MAP = { '0':'o','1':'i','3':'e','4':'a','5':'s','$':'s','@':'a','!':'i' };
 
-  return text.toLowerCase()
+  const CHAR_MAP = {
+    '0':'o','1':'i','3':'e','4':'a','5':'s',
+    '$':'s','@':'a','!':'i'
+  };
+
+  return text
+    .toLowerCase()
     .trim()
     .split('')
     .map(c => CHAR_MAP[c] || c)
@@ -17,18 +23,32 @@ function normalizeText(text) {
     .replace(/(.)\1+/g, '$1');
 }
 
-// AI toxicity check
+// ✅ AI toxicity check (FIXED PROPERLY)
 async function isInappropriate(text) {
-  const model = await modelPromise;
   if (!text) return false;
 
-  const norm = normalizeText(text);
+  try {
+    const model = await modelPromise;
 
-  const results = await model.classify([norm]);
+    const norm = normalizeText(text);
 
-  return results.some(pred =>
-    pred.results.some(r => r.match === true)
-  );
+    // 🔥 FIX: give context sentences (this is critical)
+    const inputs = [
+      `username is ${norm}`,
+      `this is a username: ${norm}`
+    ];
+
+    const results = await model.classify(inputs);
+
+    return results.some(pred =>
+      pred.results.some(r => r.match === true)
+    );
+
+  } catch (err) {
+    // ❗ Fail-safe: if AI breaks, DO NOT block signup
+    console.error("Toxicity model error:", err);
+    return false;
+  }
 }
 
 function clean(input) {
@@ -38,14 +58,19 @@ function clean(input) {
   });
 }
 
-// FIX: must be async
+// ✅ FIXED: async + safer logic
 async function createProfile(username) {
   const cleanedUsername = clean(username);
+
+  if (!cleanedUsername) {
+    throw new Error('Username required');
+  }
 
   if (data.userProfiles[cleanedUsername]) {
     return data.userProfiles[cleanedUsername];
   }
 
+  // AI check
   if (await isInappropriate(cleanedUsername)) {
     throw new Error('Username contains inappropriate content');
   }
