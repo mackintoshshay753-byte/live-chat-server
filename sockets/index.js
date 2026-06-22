@@ -73,11 +73,11 @@ function setupSockets(io) {
 
         const account = data.accounts[cleanName];
 
-        if (account && data.userProfiles[account.id]) {
-          data.userProfiles[account.id].lastOnline = new Date().toISOString();
-          data.userProfiles[account.id].isOnline = true;
-          saveData();
-        }
+        if (data.userProfiles[cleanName]) {
+  data.userProfiles[cleanName].lastOnline = new Date().toISOString();
+  data.userProfiles[cleanName].isOnline = true;
+  saveData();
+}
 
         console.log(`👤 ${cleanName} is online | Total: ${onlineUsers.size}`);
       } catch (err) {
@@ -90,10 +90,9 @@ function setupSockets(io) {
         if (currentUser) {
           onlineUsers.delete(currentUser);
 
-          const account = data.accounts[currentUser];
-          if (account && data.userProfiles[account.id]) {
-            data.userProfiles[account.id].lastOnline = new Date().toISOString();
-            data.userProfiles[account.id].isOnline = false;
+          if (data.userProfiles[currentUser]) {
+            data.userProfiles[currentUser].lastOnline = new Date().toISOString();
+            data.userProfiles[currentUser].isOnline = false;
             saveData();
           }
 
@@ -211,17 +210,16 @@ function setupSockets(io) {
           }
         };
 
-        data.userProfiles[id] = {
-          username: name,
-          createdAt: Date.now(),
-          isOnline: false,
-          lastOnline: null,
-          birthday: {
-            month: birthday.month,
-            day: Number(birthday.day),
-            year: Number(birthday.year)
-          }
-        };
+        if (data.userProfiles[name]) {
+  data.userProfiles[name].birthday = {
+    month: birthday.month,
+    day: Number(birthday.day),
+    year: Number(birthday.year)
+  };
+
+  data.userProfiles[name].isOnline = false;
+  data.userProfiles[name].lastOnline = null;
+}
 
         saveData();
         safeCb(cb, { success: true, username: name, id });

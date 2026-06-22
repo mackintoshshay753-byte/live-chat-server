@@ -11,6 +11,9 @@ const { data, saveData } = require('../data');
 router.get("/profile/:id", (req, res) => {
   try {
     const profile = getProfileById(req.params.id);
+
+    console.log("PROFILE RETURNED:", profile);
+
     if (!profile) {
       return res.status(404).json({ error: "User not found" });
     }

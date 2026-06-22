@@ -4,13 +4,18 @@ const toxicity = require('@tensorflow-models/toxicity');
 
 const modelPromise = toxicity.load(0.7);
 
-// ---------------- TEXT NORMALIZER ----------------
 function normalizeText(text) {
   if (!text) return '';
 
   const CHAR_MAP = {
-    '0': 'o', '1': 'i', '3': 'e', '4': 'a', '5': 's',
-    '$': 's', '@': 'a', '!': 'i'
+    '0': 'o',
+    '1': 'i',
+    '3': 'e',
+    '4': 'a',
+    '5': 's',
+    '$': 's',
+    '@': 'a',
+    '!': 'i'
   };
 
   return text
@@ -23,7 +28,6 @@ function normalizeText(text) {
     .replace(/(.)\1+/g, '$1');
 }
 
-// ---------------- AI CHECK ----------------
 async function isInappropriate(text) {
   if (!text) return false;
 
@@ -32,24 +36,21 @@ async function isInappropriate(text) {
 
     const norm = normalizeText(text);
 
-    const inputs = [
+    const results = await model.classify([
       norm,
       `username is ${norm}`,
       `this is a username: ${norm}`
-    ];
-
-    const results = await model.classify(inputs);
+    ]);
 
     return results.some(pred =>
       pred.results?.some(r => r.match === true)
     );
   } catch (err) {
     console.error("Toxicity error:", err);
-    return false; // never block users if AI fails
+    return false;
   }
 }
 
-// ---------------- CLEAN ----------------
 function clean(input) {
   return sanitizeHtml(String(input || '').trim(), {
     allowedTags: [],
@@ -57,7 +58,6 @@ function clean(input) {
   });
 }
 
-// ---------------- CREATE PROFILE (FIXED FLOW) ----------------
 async function createProfile(username) {
   const cleanedUsername = clean(username);
 
@@ -76,7 +76,6 @@ async function createProfile(username) {
     };
   }
 
-  // AI moderation
   const bad = await isInappropriate(cleanedUsername);
 
   if (bad) {
@@ -86,14 +85,14 @@ async function createProfile(username) {
     };
   }
 
-  // create user
   const profile = {
     id: data.nextUserId++,
     username: cleanedUsername,
     joinDate: new Date().toISOString(),
     lastOnline: new Date().toISOString(),
     theme: "light",
-    bio: ""
+    bio: "",
+    birthday: null
   };
 
   data.userProfiles[cleanedUsername] = profile;
@@ -107,27 +106,24 @@ async function createProfile(username) {
   };
 }
 
-// ---------------- GET PROFILE ----------------
 function getProfileById(id) {
   id = Number(id);
+
   if (!id) return null;
 
   const profile = Object.values(data.userProfiles)
-    .find(p => Number(p.id) === id);
+    .find(p => p && Number(p.id) === id);
 
   if (!profile) return null;
 
-  const currentUsername =
-    Object.keys(data.userProfiles)
-      .find(name => data.userProfiles[name].id === profile.id);
-
   return {
     id: profile.id,
-    username: currentUsername || profile.username,
-    joinDate: profile.joinDate,
+    username: profile.username,
+    joinDate: profile.joinDate || null,
     lastOnline: profile.lastOnline || null,
-    theme: profile.theme,
-    bio: profile.bio || ""
+    theme: profile.theme || "light",
+    bio: profile.bio || "",
+    birthday: profile.birthday || null
   };
 }
 
