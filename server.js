@@ -37,8 +37,10 @@ app.use(rateLimit({
 app.use(cors({
   origin: ALLOWED_ORIGINS,
   credentials: true,
-  methods: ["GET", "POST"]
+  methods: ["GET", "POST", "DELETE", "PUT", "PATCH", "OPTIONS"]
 }));
+
+app.options("*", cors());
 
 // Allow images to load cross-origin
 app.use((req, res, next) => {
