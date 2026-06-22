@@ -14,9 +14,11 @@ router.get("/profile/:id", (req, res) => {
     if (!profile) {
       return res.status(404).json({ error: "User not found" });
     }
+
     res.json({
       ...profile,
-      bio: profile.bio ?? ""
+      bio: profile.bio ?? "",
+      birthday: profile.birthday ?? null
     });
   } catch (err) {
     console.error("Profile API Error:", err);
