@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 
 const { onlineUsers } = require('../sockets');
-const { getProfileById, clean } = require('../helpers');
+const { getProfileById, clean, updateStatus } = require('../helpers');
 const { data, saveData } = require('../data');
 
 // ----------------------
@@ -21,29 +21,62 @@ router.get("/profile/:id", (req, res) => {
     res.json({
       ...profile,
       bio: profile.bio ?? "",
-      birthday: profile.birthday ?? null
+      birthday: profile.birthday ?? null,
+      status: profile.status ?? ""
     });
+
   } catch (err) {
     console.error("Profile API Error:", err);
     res.status(500).json({ error: "Server error" });
   }
 });
 
+// ----------------------
+// UPDATE BIO
+// ----------------------
 router.post("/profile/update-bio", (req, res) => {
   try {
     const { userId, bio } = req.body;
     if (!userId) return res.json({ success: false });
 
-    const profile = Object.values(data.userProfiles).find(p => p.id === Number(userId));
+    const profile = Object.values(data.userProfiles)
+      .find(p => p.id === Number(userId));
+
     if (!profile) return res.json({ success: false });
 
-    profile.bio = bio.trim().slice(0, 500);
+    profile.bio = (bio || "").trim().slice(0, 500);
     saveData();
 
     res.json({ success: true });
+
   } catch (err) {
     console.error("Update Bio API Error:", err);
     res.json({ success: false });
+  }
+});
+
+// ----------------------
+// UPDATE STATUS (✅ FIX YOU NEEDED)
+// ----------------------
+router.post("/profile/update-status", async (req, res) => {
+  try {
+    const { userId, status } = req.body;
+
+    if (!userId) {
+      return res.status(400).json({ success: false, error: "Missing userId" });
+    }
+
+    const result = await updateStatus(userId, status);
+
+    if (!result.success) {
+      return res.status(400).json(result);
+    }
+
+    return res.json(result);
+
+  } catch (err) {
+    console.error("Update Status API Error:", err);
+    return res.status(500).json({ success: false, error: "Server error" });
   }
 });
 
@@ -70,8 +103,8 @@ router.get("/search/users", (req, res) => {
 
         matches.push({
           id: info.id,
-          username: username,
-          isOnline: isOnline,
+          username,
+          isOnline,
           lastOnline: profile.lastOnline || null
         });
       }
@@ -82,14 +115,14 @@ router.get("/search/users", (req, res) => {
     const total = matches.length;
     const pages = Math.ceil(total / limit);
     const start = (page - 1) * limit;
-    const results = matches.slice(start, start + limit);
 
     res.json({
-      results,
+      results: matches.slice(start, start + limit),
       total,
       page,
       pages
     });
+
   } catch (err) {
     console.error("Search API Error:", err);
     res.status(500).json({ error: "Server error" });
