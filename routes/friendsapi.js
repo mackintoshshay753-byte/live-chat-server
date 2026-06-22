@@ -51,35 +51,6 @@ router.post("/request", (req, res) => {
   }
 });
 
-router.post("/cancel", (req, res) => {
-  try {
-    const { fromId, toId } = req.body;
-    const fromIdNum = Number(fromId);
-    const toIdNum = Number(toId);
-
-    // Validate IDs
-    if (!isValidId(fromIdNum) || !isValidId(toIdNum) || fromIdNum === toIdNum)
-      return res.status(400).json({ success: false, error: "Invalid IDs" });
-
-    // Check if request exists in the recipient's list
-    if (!Array.isArray(data.friendRequests[toIdNum]))
-      return res.status(404).json({ success: false, error: "No such request found" });
-
-    const requestExists = data.friendRequests[toIdNum].some(r => r.fromId === fromIdNum);
-    if (!requestExists)
-      return res.status(404).json({ success: false, error: "No such request found" });
-
-    // Remove the request
-    data.friendRequests[toIdNum] = data.friendRequests[toIdNum].filter(r => r.fromId !== fromIdNum);
-
-    saveData();
-    return res.status(200).json({ success: true, message: "Friend request cancelled" });
-  } catch (err) {
-    console.error(err);
-    return res.status(500).json({ success: false, error: "Server error" });
-  }
-});
-
 router.get("/requests/:userId", (req, res) => {
   try {
     const userId = Number(req.params.userId);
