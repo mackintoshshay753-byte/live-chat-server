@@ -13,11 +13,9 @@ const PORT = 3000;
 const ALLOWED_ORIGINS = ["https://idontknowww.neocities.org"];
 
 // Security headers
-app.use(helmet({
-  contentSecurityPolicy: false
-}));
+app.use(helmet({ contentSecurityPolicy: false }));
 
-// Remove Helmet CORP/COEP for static files (fixes images)
+// Remove restrictive headers for assets
 app.use((req, res, next) => {
   res.removeHeader("Cross-Origin-Resource-Policy");
   res.removeHeader("Cross-Origin-Embedder-Policy");
@@ -25,7 +23,7 @@ app.use((req, res, next) => {
   next();
 });
 
-// Basic rate limiting
+// Rate limiting
 app.use(rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 300,
@@ -33,23 +31,25 @@ app.use(rateLimit({
   legacyHeaders: false
 }));
 
-// CORS
+// ✅ Full CORS setup — allows DELETE and OPTIONS
 app.use(cors({
   origin: ALLOWED_ORIGINS,
   credentials: true,
-  methods: ["GET", "POST"]
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"]
 }));
+app.options("*", cors());
 
-// Allow images to load cross-origin
+// Extra cross-origin header
 app.use((req, res, next) => {
   res.header("Access-Control-Allow-Origin", ALLOWED_ORIGINS[0]);
   next();
 });
 
-// Body parser
+// Parse JSON bodies
 app.use(express.json({ limit: '10kb' }));
 
-// Static files
+// Serve static files
 app.use(express.static(path.join(__dirname, 'public'), {
   etag: true,
   maxAge: '1h',
