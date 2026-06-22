@@ -157,6 +157,7 @@ router.post("/unfriend", (req, res) => {
   }
 });
 
+// ✅ FIXED /list endpoint with debug
 router.get("/list/:userId", (req, res) => {
   try {
     const userId = Number(req.params.userId);
@@ -164,12 +165,21 @@ router.get("/list/:userId", (req, res) => {
       return res.status(400).json({ success: false, error: "Invalid ID" });
 
     const friendIds = Array.isArray(data.friends[userId]) ? data.friends[userId] : [];
+    
+    // Debug logs to see what's happening
+    console.log("Friend IDs:", friendIds);
+    console.log("All accounts:", data.accounts);
 
-    // ✅ This part was correct — make sure it's running exactly like this
-    const friends = Object.values(data.accounts || {})
-      .filter(acc => friendIds.includes(acc.id))
-      .map(acc => ({ id: acc.id, username: acc.username }));
+    // Make sure we match correctly and provide fallback
+    const friends = friendIds.map(friendId => {
+      const acc = Object.values(data.accounts || {}).find(a => Number(a.id) === Number(friendId));
+      return {
+        id: friendId,
+        username: acc?.username || `User ${friendId}` // Fallback instead of undefined
+      };
+    });
 
+    console.log("Final friends response:", friends);
     return res.status(200).json({ success: true, friends });
   } catch (err) {
     console.error(err);
