@@ -601,4 +601,32 @@ router.get("/user/:userId", (req, res) => {
   }
 });
 
+router.get("/:id/shout", (req, res) => {
+  try {
+    const groupId = Number(req.params.id);
+    if (isNaN(groupId)) return res.json({ success: false, error: "Invalid group ID" });
+    const group = data.groups.find(g => g.id === groupId);
+    if (!group) return res.json({ success: false, error: "Group not found" });
+    res.json({ success: true, shout: group.shout || null });
+  } catch (err) {
+    res.json({ success: false, error: err.message });
+  }
+});
+
+router.post("/:id/shout", (req, res) => {
+  try {
+    const groupId = Number(req.params.id), userId = Number(req.body.userId);
+    const message = (req.body.message || "").trim().slice(0, 255);
+    if (isNaN(groupId) || isNaN(userId)) return res.json({ success: false, error: "Missing or invalid ID" });
+    const group = data.groups.find(g => g.id === groupId);
+    if (!group) return res.json({ success: false, error: "Group not found" });
+    if (Number(group.createdById) !== userId) return res.json({ success: false, error: "Only the group owner can update the shout" });
+    group.shout = { message, updatedAt: new Date().toISOString(), updatedBy: group.createdBy };
+    saveData();
+    res.json({ success: true, shout: group.shout });
+  } catch (err) {
+    res.json({ success: false, error: err.message });
+  }
+});
+
 module.exports = router;
