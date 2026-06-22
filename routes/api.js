@@ -12,8 +12,6 @@ router.get("/profile/:id", (req, res) => {
   try {
     const profile = getProfileById(req.params.id);
 
-    console.log("PROFILE RETURNED:", profile);
-
     if (!profile) {
       return res.status(404).json({ error: "User not found" });
     }
@@ -21,7 +19,7 @@ router.get("/profile/:id", (req, res) => {
     res.json({
       ...profile,
       bio: profile.bio ?? "",
-      status: profile.status ?? "", // ✅ add status field
+      status: profile.status ?? "", // ✅ Returns saved status
       birthday: profile.birthday ?? null
     });
   } catch (err) {
@@ -30,7 +28,7 @@ router.get("/profile/:id", (req, res) => {
   }
 });
 
-// ✅ NEW: Update User Status
+// ✅ Save status to database
 router.post("/profile/update-status", (req, res) => {
   try {
     const { userId, status } = req.body;
@@ -39,7 +37,6 @@ router.post("/profile/update-status", (req, res) => {
     const profile = Object.values(data.userProfiles).find(p => p.id === Number(userId));
     if (!profile) return res.json({ success: false, error: "Profile not found" });
 
-    // Save, trim, and limit to 254 characters
     profile.status = status.trim().slice(0, 254);
     saveData();
 
