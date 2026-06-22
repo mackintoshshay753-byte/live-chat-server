@@ -164,6 +164,8 @@ router.get("/list/:userId", (req, res) => {
       return res.status(400).json({ success: false, error: "Invalid ID" });
 
     const friendIds = Array.isArray(data.friends[userId]) ? data.friends[userId] : [];
+
+    // ✅ This part was correct — make sure it's running exactly like this
     const friends = Object.values(data.accounts || {})
       .filter(acc => friendIds.includes(acc.id))
       .map(acc => ({ id: acc.id, username: acc.username }));
