@@ -12,6 +12,8 @@ router.get("/profile/:id", (req, res) => {
   try {
     const profile = getProfileById(req.params.id);
 
+    console.log("PROFILE RETURNED:", profile);
+
     if (!profile) {
       return res.status(404).json({ error: "User not found" });
     }
@@ -19,31 +21,11 @@ router.get("/profile/:id", (req, res) => {
     res.json({
       ...profile,
       bio: profile.bio ?? "",
-      status: profile.status ?? "", // ✅ Returns saved status
       birthday: profile.birthday ?? null
     });
   } catch (err) {
     console.error("Profile API Error:", err);
     res.status(500).json({ error: "Server error" });
-  }
-});
-
-// ✅ Save status to database
-router.post("/profile/update-status", (req, res) => {
-  try {
-    const { userId, status } = req.body;
-    if (!userId) return res.json({ success: false, error: "Missing user ID" });
-
-    const profile = Object.values(data.userProfiles).find(p => p.id === Number(userId));
-    if (!profile) return res.json({ success: false, error: "Profile not found" });
-
-    profile.status = status.trim().slice(0, 254);
-    saveData();
-
-    res.json({ success: true, status: profile.status });
-  } catch (err) {
-    console.error("Update Status API Error:", err);
-    res.json({ success: false, error: "Server error" });
   }
 });
 

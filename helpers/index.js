@@ -33,7 +33,6 @@ async function isInappropriate(text) {
 
   try {
     const model = await modelPromise;
-
     const norm = normalizeText(text);
 
     const results = await model.classify([
@@ -77,7 +76,6 @@ async function createProfile(username) {
   }
 
   const bad = await isInappropriate(cleanedUsername);
-
   if (bad) {
     return {
       success: false,
@@ -92,7 +90,8 @@ async function createProfile(username) {
     lastOnline: new Date().toISOString(),
     theme: "light",
     bio: "",
-    birthday: null
+    birthday: null,
+    status: "" // ✅ Added status field
   };
 
   data.userProfiles[cleanedUsername] = profile;
@@ -108,7 +107,6 @@ async function createProfile(username) {
 
 function getProfileById(id) {
   id = Number(id);
-
   if (!id) return null;
 
   const profile = Object.values(data.userProfiles)
@@ -123,13 +121,31 @@ function getProfileById(id) {
     lastOnline: profile.lastOnline || null,
     theme: profile.theme || "light",
     bio: profile.bio || "",
-    birthday: profile.birthday || null
+    birthday: profile.birthday || null,
+    status: profile.status || "" // ✅ Return status
   };
+}
+
+// ✅ NEW: Update status endpoint logic
+async function updateStatus(userId, newStatus) {
+  userId = Number(userId);
+  const profile = Object.values(data.userProfiles)
+    .find(p => p && Number(p.id) === userId);
+
+  if (!profile) return { success: false, error: "User not found" };
+
+  const cleanedStatus = clean(newStatus).slice(0, 254); // Same max length as frontend
+  profile.status = cleanedStatus;
+  profile.lastOnline = new Date().toISOString();
+
+  saveData();
+  return { success: true, status: profile.status };
 }
 
 module.exports = {
   clean,
   createProfile,
   getProfileById,
-  isInappropriate
+  isInappropriate,
+  updateStatus // ✅ Export the new function
 };
