@@ -21,11 +21,32 @@ router.get("/profile/:id", (req, res) => {
     res.json({
       ...profile,
       bio: profile.bio ?? "",
+      status: profile.status ?? "", // ✅ add status field
       birthday: profile.birthday ?? null
     });
   } catch (err) {
     console.error("Profile API Error:", err);
     res.status(500).json({ error: "Server error" });
+  }
+});
+
+// ✅ NEW: Update User Status
+router.post("/profile/update-status", (req, res) => {
+  try {
+    const { userId, status } = req.body;
+    if (!userId) return res.json({ success: false, error: "Missing user ID" });
+
+    const profile = Object.values(data.userProfiles).find(p => p.id === Number(userId));
+    if (!profile) return res.json({ success: false, error: "Profile not found" });
+
+    // Save, trim, and limit to 254 characters
+    profile.status = status.trim().slice(0, 254);
+    saveData();
+
+    res.json({ success: true, status: profile.status });
+  } catch (err) {
+    console.error("Update Status API Error:", err);
+    res.json({ success: false, error: "Server error" });
   }
 });
 
