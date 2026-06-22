@@ -412,22 +412,38 @@ router.post("/:id/wall/create", (req, res) => {
   }
 });
 
-router.delete("/:groupId/wall/:postId", async (req, res) => {
+// ----------------------
+// WALL - DELETE POST
+// ----------------------
+router.delete("/:groupId/wall/:postId", (req, res) => {
   try {
-    const groupId = Number(req.params.groupId), postId = Number(req.params.postId), userId = Number(req.body.userId);
-    if (isNaN(groupId) || isNaN(postId) || isNaN(userId)) return res.json({ success: false, error: "Invalid ID" });
+    const groupId = Number(req.params.groupId);
+    const postId = Number(req.params.postId);
+    const userId = Number(req.body.userId || req.query.userId);
+
+    if (isNaN(groupId) || isNaN(postId) || isNaN(userId)) {
+      return res.json({ success: false, error: "Invalid ID" });
+    }
+
     const group = data.groups.find(g => g.id === groupId);
     if (!group) return res.json({ success: false, error: "Group not found" });
     if (!Array.isArray(group.wallPosts)) return res.json({ success: false, error: "Post not found" });
-    const idx = group.wallPosts.findIndex(p => p.id === postId);
-    if (idx === -1) return res.json({ success: false, error: "Post not found" });
-    const post = group.wallPosts[idx];
-    if (group.createdById !== userId && post.userId !== userId) return res.json({ success: false, error: "No permission to delete" });
-    group.wallPosts.splice(idx, 1);
+
+    const postIndex = group.wallPosts.findIndex(p => p.id === postId);
+    if (postIndex === -1) return res.json({ success: false, error: "Post not found" });
+
+    const post = group.wallPosts[postIndex];
+    const isOwner = group.createdById === userId;
+    const isAuthor = post.userId === userId;
+
+    if (!isOwner && !isAuthor) return res.json({ success: false, error: "No permission to delete" });
+
+    group.wallPosts.splice(postIndex, 1);
     saveData();
-    return res.json({ success: true });
-  } catch {
-    return res.json({ success: false, error: "Failed to delete post" });
+    res.json({ success: true });
+
+  } catch (err) {
+    res.json({ success: false, error: "Failed to delete post" });
   }
 });
 
