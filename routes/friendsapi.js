@@ -2,189 +2,95 @@ const express = require('express');
 const router = express.Router();
 const { data, saveData } = require('../data');
 
-const MAX_FRIENDS = 200;
-const isValidId = id => Number.isInteger(id) && id > 0;
-const userExists = id => Object.values(data.accounts || {}).some(acc => acc.id === id);
-
+// Send friend request
 router.post("/request", (req, res) => {
-  try {
-    const { fromId, fromUsername, toId } = req.body;
-    const fromIdNum = Number(fromId);
-    const toIdNum = Number(toId);
+  const { fromId, fromUsername, toId } = req.body;
+  const fromIdNum = Number(fromId);
+  const toIdNum = Number(toId);
 
-    if (!isValidId(fromIdNum) || !isValidId(toIdNum) || fromIdNum === toIdNum)
-      return res.status(400).json({ success: false, error: "Invalid IDs" });
+  if (!fromIdNum || !toIdNum || fromIdNum === toIdNum) 
+    return res.json({ success: false, error: "Invalid" });
 
-    if (typeof fromUsername !== "string" || fromUsername.trim().length < 2 || fromUsername.trim().length > 30)
-      return res.status(400).json({ success: false, error: "Invalid username" });
+  if (!data.friendRequests[toIdNum]) data.friendRequests[toIdNum] = [];
 
-    if (!userExists(fromIdNum) || !userExists(toIdNum))
-      return res.status(404).json({ success: false, error: "User not found" });
+  const alreadyRequested = data.friendRequests[toIdNum].some(r => r.fromId === fromIdNum);
+  if (alreadyRequested) return res.json({ success: false, error: "Already requested" });
 
-    if (!Array.isArray(data.friendRequests[toIdNum])) data.friendRequests[toIdNum] = [];
+  const alreadyFriends = data.friends[fromIdNum]?.includes(toIdNum);
+  if (alreadyFriends) return res.json({ success: false, error: "Already friends" });
 
-    const alreadyRequested = data.friendRequests[toIdNum].some(r => r.fromId === fromIdNum);
-    if (alreadyRequested)
-      return res.status(409).json({ success: false, error: "Request already sent" });
-
-    const alreadyFriends = Array.isArray(data.friends?.[fromIdNum]) && data.friends[fromIdNum].includes(toIdNum);
-    if (alreadyFriends)
-      return res.status(409).json({ success: false, error: "Already friends" });
-
-    if ((data.friends?.[fromIdNum]?.length || 0) >= MAX_FRIENDS)
-      return res.status(403).json({ success: false, error: "You have reached the maximum number of friends" });
-
-    if ((data.friends?.[toIdNum]?.length || 0) >= MAX_FRIENDS)
-      return res.status(403).json({ success: false, error: "This user has reached the maximum number of friends" });
-
-    data.friendRequests[toIdNum].push({
-      fromId: fromIdNum,
-      fromUsername: fromUsername.trim(),
-      timestamp: new Date().toISOString()
-    });
-
-    saveData();
-    return res.status(200).json({ success: true });
-  } catch (err) {
-    console.error(err);
-    return res.status(500).json({ success: false, error: "Server error" });
-  }
+  data.friendRequests[toIdNum].push({
+    fromId: fromIdNum,
+    fromUsername,
+    timestamp: new Date().toISOString()
+  });
+  saveData();
+  res.json({ success: true });
 });
 
+// Get my incoming requests
 router.get("/requests/:userId", (req, res) => {
-  try {
-    const userId = Number(req.params.userId);
-    if (!isValidId(userId))
-      return res.status(400).json({ success: false, error: "Invalid ID" });
-
-    const requests = Array.isArray(data.friendRequests[userId]) ? data.friendRequests[userId] : [];
-    return res.status(200).json({ success: true, requests });
-  } catch (err) {
-    console.error(err);
-    return res.status(500).json({ success: false, error: "Server error" });
-  }
+  const userId = Number(req.params.userId);
+  res.json({ requests: data.friendRequests[userId] || [] });
 });
 
+// Accept request
 router.post("/accept", (req, res) => {
-  try {
-    const { fromId, toId } = req.body;
-    const fromIdNum = Number(fromId);
-    const toIdNum = Number(toId);
+  const { fromId, toId } = req.body;
+  const fromIdNum = Number(fromId);
+  const toIdNum = Number(toId);
 
-    if (!isValidId(fromIdNum) || !isValidId(toIdNum))
-      return res.status(400).json({ success: false, error: "Invalid IDs" });
+  if (!fromIdNum || !toIdNum) return res.json({ success: false });
 
-    if (!Array.isArray(data.friendRequests[toIdNum]))
-      return res.status(404).json({ success: false, error: "No request found" });
-
-    const exists = data.friendRequests[toIdNum].some(r => r.fromId === fromIdNum);
-    if (!exists)
-      return res.status(404).json({ success: false, error: "Request not found" });
-
-    if ((data.friends?.[fromIdNum]?.length || 0) >= MAX_FRIENDS)
-      return res.status(403).json({ success: false, error: "Sender has reached maximum friends" });
-
-    if ((data.friends?.[toIdNum]?.length || 0) >= MAX_FRIENDS)
-      return res.status(403).json({ success: false, error: "You have reached maximum friends" });
-
+  if (data.friendRequests[toIdNum]) {
     data.friendRequests[toIdNum] = data.friendRequests[toIdNum].filter(r => r.fromId !== fromIdNum);
-
-    if (!Array.isArray(data.friends[fromIdNum])) data.friends[fromIdNum] = [];
-    if (!Array.isArray(data.friends[toIdNum])) data.friends[toIdNum] = [];
-
-    if (!data.friends[fromIdNum].includes(toIdNum)) data.friends[fromIdNum].push(toIdNum);
-    if (!data.friends[toIdNum].includes(fromIdNum)) data.friends[toIdNum].push(fromIdNum);
-
-    saveData();
-    return res.status(200).json({ success: true });
-  } catch (err) {
-    console.error(err);
-    return res.status(500).json({ success: false, error: "Server error" });
   }
+
+  if (!data.friends[fromIdNum]) data.friends[fromIdNum] = [];
+  if (!data.friends[toIdNum]) data.friends[toIdNum] = [];
+  if (!data.friends[fromIdNum].includes(toIdNum)) data.friends[fromIdNum].push(toIdNum);
+  if (!data.friends[toIdNum].includes(fromIdNum)) data.friends[toIdNum].push(fromIdNum);
+
+  saveData();
+  res.json({ success: true });
 });
 
+// Reject request
 router.post("/reject", (req, res) => {
-  try {
-    const { fromId, toId } = req.body;
-    const fromIdNum = Number(fromId);
-    const toIdNum = Number(toId);
+  const { fromId, toId } = req.body;
+  const fromIdNum = Number(fromId);
+  const toIdNum = Number(toId);
 
-    if (!isValidId(fromIdNum) || !isValidId(toIdNum))
-      return res.status(400).json({ success: false, error: "Invalid IDs" });
-
-    let removed = false;
-    if (Array.isArray(data.friendRequests[toIdNum])) {
-      const before = data.friendRequests[toIdNum].length;
-      data.friendRequests[toIdNum] = data.friendRequests[toIdNum].filter(r => r.fromId !== fromIdNum);
-      removed = data.friendRequests[toIdNum].length < before;
-    }
-
-    if (removed) saveData();
-    return res.status(200).json({ success: true });
-  } catch (err) {
-    console.error(err);
-    return res.status(500).json({ success: false, error: "Server error" });
+  if (data.friendRequests[toIdNum]) {
+    data.friendRequests[toIdNum] = data.friendRequests[toIdNum].filter(r => r.fromId !== fromIdNum);
+    saveData();
   }
+  res.json({ success: true });
 });
 
+// Unfriend
 router.post("/unfriend", (req, res) => {
-  try {
-    const { userId, friendId } = req.body;
-    const userIdNum = Number(userId);
-    const friendIdNum = Number(friendId);
+  const { userId, friendId } = req.body;
+  const userIdNum = Number(userId);
+  const friendIdNum = Number(friendId);
 
-    if (!isValidId(userIdNum) || !isValidId(friendIdNum) || userIdNum === friendIdNum)
-      return res.status(400).json({ success: false, error: "Invalid IDs" });
-
-    let changed = false;
-    if (Array.isArray(data.friends[userIdNum])) {
-      const before = data.friends[userIdNum].length;
-      data.friends[userIdNum] = data.friends[userIdNum].filter(id => id !== friendIdNum);
-      if (data.friends[userIdNum].length !== before) changed = true;
-    }
-
-    if (Array.isArray(data.friends[friendIdNum])) {
-      const before = data.friends[friendIdNum].length;
-      data.friends[friendIdNum] = data.friends[friendIdNum].filter(id => id !== userIdNum);
-      if (data.friends[friendIdNum].length !== before) changed = true;
-    }
-
-    if (changed) saveData();
-    return res.status(200).json({ success: true });
-  } catch (err) {
-    console.error(err);
-    return res.status(500).json({ success: false, error: "Server error" });
-  }
+  if (data.friends[userIdNum]) data.friends[userIdNum] = data.friends[userIdNum].filter(id => id !== friendIdNum);
+  if (data.friends[friendIdNum]) data.friends[friendIdNum] = data.friends[friendIdNum].filter(id => id !== userIdNum);
+  saveData();
+  res.json({ success: true });
 });
 
-// ✅ FIXED /list endpoint with debug
+// Get my friends list
 router.get("/list/:userId", (req, res) => {
-  try {
-    const userId = Number(req.params.userId);
-    if (!isValidId(userId))
-      return res.status(400).json({ success: false, error: "Invalid ID" });
+  const userId = Number(req.params.userId);
+  const friendIds = data.friends[userId] || [];
 
-    const friendIds = Array.isArray(data.friends[userId]) ? data.friends[userId] : [];
-    
-    // Debug logs to see what's happening
-    console.log("Friend IDs:", friendIds);
-    console.log("All accounts:", data.accounts);
+  const friends = Object.entries(data.accounts).map(([username, info]) => ({
+    id: info.id,
+    username
+  })).filter(u => friendIds.includes(u.id));
 
-    // Make sure we match correctly and provide fallback
-    const friends = friendIds.map(friendId => {
-      const acc = Object.values(data.accounts || {}).find(a => Number(a.id) === Number(friendId));
-      return {
-        id: friendId,
-        username: acc?.username || `User ${friendId}` // Fallback instead of undefined
-      };
-    });
-
-    console.log("Final friends response:", friends);
-    return res.status(200).json({ success: true, friends });
-  } catch (err) {
-    console.error(err);
-    return res.status(500).json({ success: false, error: "Server error" });
-  }
+  res.json({ friends });
 });
 
 module.exports = router;
