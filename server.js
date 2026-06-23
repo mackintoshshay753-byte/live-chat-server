@@ -76,7 +76,7 @@ app.use('/api', require('./routes/api'));
 app.use('/api/friends', require('./routes/friendsapi'));
 app.use('/api/groups', require('./routes/groupsapi'));
 app.use('/api/messages', require('./routes/messagesapi'));
-app.use('/api/admin', require('./routes/admin'));
+app.use('/api/admin', require('./routes/admins'));
 app.use('/', require('./routes/pages'));
 
 server.listen(PORT, () => console.log("✅ Server running on port", PORT));
