@@ -6,44 +6,17 @@ const modelPromise = toxicity.load(0.7);
 
 function normalizeText(text) {
   if (!text) return '';
-
-  const CHAR_MAP = {
-    '0': 'o',
-    '1': 'i',
-    '3': 'e',
-    '4': 'a',
-    '5': 's',
-    '$': 's',
-    '@': 'a',
-    '!': 'i'
-  };
-
-  return text
-    .toLowerCase()
-    .trim()
-    .split('')
-    .map(c => CHAR_MAP[c] || c)
-    .join('')
-    .replace(/[^a-z]/g, '')
-    .replace(/(.)\1+/g, '$1');
+  const CHAR_MAP = { '0':'o', '1':'i', '3':'e', '4':'a', '5':'s', '$':'s', '@':'a', '!':'i' };
+  return text.toLowerCase().trim().split('').map(c => CHAR_MAP[c] || c).join('').replace(/[^a-z]/g, '').replace(/(.)\1+/g, '$1');
 }
 
 async function isInappropriate(text) {
   if (!text) return false;
-
   try {
     const model = await modelPromise;
     const norm = normalizeText(text);
-
-    const results = await model.classify([
-      norm,
-      `username is ${norm}`,
-      `this is a username: ${norm}`
-    ]);
-
-    return results.some(pred =>
-      pred.results?.some(r => r.match === true)
-    );
+    const results = await model.classify([norm, `username is ${norm}`, `this is a username: ${norm}`]);
+    return results.some(pred => pred.results?.some(r => r.match === true));
   } catch (err) {
     console.error("Toxicity error:", err);
     return false;
@@ -51,79 +24,48 @@ async function isInappropriate(text) {
 }
 
 function clean(input) {
-  return sanitizeHtml(String(input || '').trim(), {
-    allowedTags: [],
-    allowedAttributes: {}
-  });
+  return sanitizeHtml(String(input || '').trim(), { allowedTags: [], allowedAttributes: {} });
 }
 
 async function createProfile(username) {
   const cleanedUsername = clean(username);
-
-  if (!cleanedUsername) {
-    return { success: false, message: "Username required" };
-  }
-
-  if (cleanedUsername.length < 3 || cleanedUsername.length > 20) {
-    return { success: false, message: "Username must be 3–20 characters" };
-  }
-
-  if (data.userProfiles[cleanedUsername]) {
-    return {
-      success: false,
-      message: "Username already exists"
-    };
-  }
+  if (!cleanedUsername) return { success: false, message: "Username required" };
+  if (cleanedUsername.length < 3 || cleanedUsername.length > 20) return { success: false, message: "Username must be 3–20 characters" };
+  if (data.userProfiles[cleanedUsername]) return { success: false, message: "Username already exists" };
 
   const bad = await isInappropriate(cleanedUsername);
-  if (bad) {
-    return {
-      success: false,
-      message: "Username is not appropriate"
-    };
-  }
+  if (bad) return { success: false, message: "Username is not appropriate" };
 
-  // Get correct role automatically
-const userRole = setRoleOnSignup(cleanedUsername);
+  // Get correct role
+  const userRole = setRoleOnSignup(cleanedUsername);
 
-const profile = {
-  id: data.nextUserId++,
-  username: cleanedUsername,
-  joinDate: new Date().toISOString(),
-  lastOnline: new Date().toISOString(),
-  theme: "light",
-  bio: "",
-  birthday: null,
-  status: "",
-  role: userRole // ✅ Add role here
-};
+  const profile = {
+    id: data.nextUserId++,
+    username: cleanedUsername,
+    joinDate: new Date().toISOString(),
+    lastOnline: new Date().toISOString(),
+    theme: "light",
+    bio: "",
+    birthday: null,
+    status: "",
+    role: userRole
+  };
 
-// Also save role to the accounts object so the server restart check works
-data.accounts[cleanedUsername] = {
-  id: profile.id,
-  role: userRole
-};
-
-data.userProfiles[cleanedUsername] = profile;
-data.usernameToId[cleanedUsername] = profile.id;
+  // Save to BOTH places so admin routes see it
+  data.userProfiles[cleanedUsername] = profile;
+  data.accounts[cleanedUsername] = { id: profile.id, role: userRole };
+  data.registeredNames[cleanedUsername] = true;
+  data.usernameToId[cleanedUsername] = profile.id;
 
   saveData();
-
-  return {
-    success: true,
-    user: profile
-  };
+  return { success: true, user: profile };
 }
 
 function getProfileById(id) {
   id = Number(id);
   if (!id) return null;
-
-  const profile = Object.values(data.userProfiles)
-    .find(p => p && Number(p.id) === id);
-
+  const profile = Object.values(data.userProfiles).find(p => p && Number(p.id) === id);
   if (!profile) return null;
-
   return {
     id: profile.id,
     username: profile.username,
@@ -137,26 +79,15 @@ function getProfileById(id) {
   };
 }
 
-// ✅ NEW: Update status endpoint logic
 async function updateStatus(userId, newStatus) {
   userId = Number(userId);
-  const profile = Object.values(data.userProfiles)
-    .find(p => p && Number(p.id) === userId);
-
+  const profile = Object.values(data.userProfiles).find(p => p && Number(p.id) === userId);
   if (!profile) return { success: false, error: "User not found" };
-
-  const cleanedStatus = clean(newStatus).slice(0, 254); // Same max length as frontend
+  const cleanedStatus = clean(newStatus).slice(0, 254);
   profile.status = cleanedStatus;
   profile.lastOnline = new Date().toISOString();
-
   saveData();
   return { success: true, status: profile.status };
 }
 
-module.exports = {
-  clean,
-  createProfile,
-  getProfileById,
-  isInappropriate,
-  updateStatus // ✅ Export the new function
-};
+module.exports = { clean, createProfile, getProfileById, isInappropriate, updateStatus };

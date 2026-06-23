@@ -32,10 +32,20 @@ function loadData() {
     const loaded = JSON.parse(raw);
     data = { ...DEFAULT_DATA, ...loaded };
 
-    // ✅ Rule: If username is "sadieandshay87", make sure it's always Owner
+    // ✅ Sync roles from userProfiles into accounts
     const MY_OWNER_USERNAME = "sadieandshay87";
-    if (data.accounts[MY_OWNER_USERNAME]) {
-      if (data.accounts[MY_OWNER_USERNAME].role !== "owner") {
+
+    // First: if exists in userProfiles, copy role to accounts
+    Object.entries(data.userProfiles || {}).forEach(([uname, prof]) => {
+      if (!data.accounts[uname]) data.accounts[uname] = { id: prof.id };
+      // Keep role in sync
+      data.accounts[uname].role = prof.role || "user";
+    });
+
+    // ✅ Force owner role for your username
+    if (data.userProfiles[MY_OWNER_USERNAME]) {
+      if (data.userProfiles[MY_OWNER_USERNAME].role !== "owner") {
+        data.userProfiles[MY_OWNER_USERNAME].role = "owner";
         data.accounts[MY_OWNER_USERNAME].role = "owner";
         saveData();
         console.log(`✅ ${MY_OWNER_USERNAME} set and saved as Owner`);
@@ -63,12 +73,9 @@ function saveData() {
   }
 }
 
-// ✅ NEW: Automatically set role when you create your account
+// ✅ Automatically set role when you create your account
 function setRoleOnSignup(username, role = "user") {
-  if (username === "sadieandshay87") {
-    role = "owner";
-  }
-  return role;
+  return username === "sadieandshay87" ? "owner" : role;
 }
 
 module.exports = { data, loadData, saveData, setRoleOnSignup };
