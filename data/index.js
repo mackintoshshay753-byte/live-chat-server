@@ -4,11 +4,34 @@ const path = require('path');
 const DATA_PATH = path.join(__dirname, 'chat-data.json');
 
 const DEFAULT_DATA = {
-  nextUserId: 1,
-  registeredNames: {},
-  accounts: {},
-  userProfiles: {},
-  usernameToId: {},
+  nextUserId: 2,
+  registeredNames: {
+    "sadieandshay87": true
+  },
+  accounts: {
+    "sadieandshay87": {
+      id: 1,
+      hash: "$2b$12$EixZaYb7xqgRjKzRjKzRjOe0xQe0xQe0xQe0xQe0xQe0xQe0xQe0xQ",
+      joinDate: new Date().toISOString(),
+      theme: "light",
+      verified: false,
+      role: "owner", // ✅ ALREADY OWNER FROM DAY ONE
+      birthday: { "month": "June", "day": 23, "year": 2000 }
+    }
+  },
+  userProfiles: {
+    "sadieandshay87": {
+      id: 1,
+      username: "sadieandshay87",
+      joinDate: new Date().toISOString(),
+      lastOnline: null,
+      theme: "light",
+      bio: "",
+      birthday: { "month": "June", "day": 23, "year": 2000 },
+      status: ""
+    }
+  },
+  usernameToId: { "sadieandshay87": 1 },
   friendRequests: {},
   friends: {},
   groups: [],
@@ -21,7 +44,8 @@ let data = { ...DEFAULT_DATA };
 
 function loadData() {
   if (!fs.existsSync(DATA_PATH)) {
-    console.log("📄 No file — creating new");
+    console.log("📄 Creating fresh data with Owner account");
+    data = { ...DEFAULT_DATA };
     saveData();
     return;
   }
@@ -30,24 +54,19 @@ function loadData() {
     const loaded = JSON.parse(raw);
     data = { ...DEFAULT_DATA, ...loaded };
 
-    // ✅ AUTO-SET + SAVE OWNER PERMANENTLY
-    const MY_OWNER_USERNAME = "sadieandshay87";
-    if (data.accounts[MY_OWNER_USERNAME]) {
-      if (data.accounts[MY_OWNER_USERNAME].role !== "owner") {
-        data.accounts[MY_OWNER_USERNAME].role = "owner";
-        saveData(); // <-- THIS IS THE MISSING LINE
-        console.log(`✅ ${MY_OWNER_USERNAME} set and saved as Owner`);
-      } else {
-        console.log(`ℹ️ ${MY_OWNER_USERNAME} is already Owner`);
+    // Still force owner if it ever changes
+    if (data.accounts["sadieandshay87"]) {
+      if (data.accounts["sadieandshay87"].role !== "owner") {
+        data.accounts["sadieandshay87"].role = "owner";
+        saveData();
+        console.log("✅ Forced sadieandshay87 to Owner");
       }
-    } else {
-      console.log(`ℹ️ ${MY_OWNER_USERNAME} not found yet — will become Owner when you sign up`);
     }
 
-    console.log("✅ Data loaded — all users preserved");
+    console.log("✅ Data loaded");
   } catch (err) {
-    console.error("⚠️ Data read error — backup saved, starting fresh");
-    if (fs.existsSync(DATA_PATH)) fs.renameSync(DATA_PATH, DATA_PATH + `.bak-${Date.now()}.json`);
+    console.error("⚠️ Corrupted file — resetting to default");
+    data = { ...DEFAULT_DATA };
     saveData();
   }
 }
