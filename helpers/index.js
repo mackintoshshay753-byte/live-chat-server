@@ -1,5 +1,5 @@
 const sanitizeHtml = require('sanitize-html');
-const { data, saveData } = require('../data');
+const { data, saveData, setRoleOnSignup } = require('../data');
 const toxicity = require('@tensorflow-models/toxicity');
 
 const modelPromise = toxicity.load(0.7);
@@ -83,19 +83,29 @@ async function createProfile(username) {
     };
   }
 
-  const profile = {
-    id: data.nextUserId++,
-    username: cleanedUsername,
-    joinDate: new Date().toISOString(),
-    lastOnline: new Date().toISOString(),
-    theme: "light",
-    bio: "",
-    birthday: null,
-    status: "" // ✅ Added status field
-  };
+  // Get correct role automatically
+const userRole = setRoleOnSignup(cleanedUsername);
 
-  data.userProfiles[cleanedUsername] = profile;
-  data.usernameToId[cleanedUsername] = profile.id;
+const profile = {
+  id: data.nextUserId++,
+  username: cleanedUsername,
+  joinDate: new Date().toISOString(),
+  lastOnline: new Date().toISOString(),
+  theme: "light",
+  bio: "",
+  birthday: null,
+  status: "",
+  role: userRole // ✅ Add role here
+};
+
+// Also save role to the accounts object so the server restart check works
+data.accounts[cleanedUsername] = {
+  id: profile.id,
+  role: userRole
+};
+
+data.userProfiles[cleanedUsername] = profile;
+data.usernameToId[cleanedUsername] = profile.id;
 
   saveData();
 
@@ -122,7 +132,8 @@ function getProfileById(id) {
     theme: profile.theme || "light",
     bio: profile.bio || "",
     birthday: profile.birthday || null,
-    status: profile.status || "" // ✅ Return status
+    status: profile.status || "",
+    role: profile.role || "user"
   };
 }
 
