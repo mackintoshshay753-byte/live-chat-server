@@ -74,10 +74,10 @@ function setupSockets(io) {
         const account = data.accounts[cleanName];
 
         if (data.userProfiles[cleanName]) {
-  data.userProfiles[cleanName].lastOnline = new Date().toISOString();
-  data.userProfiles[cleanName].isOnline = true;
-  saveData();
-}
+          data.userProfiles[cleanName].lastOnline = new Date().toISOString();
+          data.userProfiles[cleanName].isOnline = true;
+          saveData();
+        }
 
         console.log(`👤 ${cleanName} is online | Total: ${onlineUsers.size}`);
       } catch (err) {
@@ -118,8 +118,9 @@ function setupSockets(io) {
         const lowerName = name.toLowerCase();
         const account = data.accounts[name];
 
-        if (!account || !data.registeredNames[lowerName]) {
-          return safeCb(cb, { message: "Account not found" });
+        // ✅ Added safety check to prevent bcrypt crash
+        if (!account || !account.hash || !data.registeredNames[lowerName]) {
+          return safeCb(cb, { message: "Account not found or invalid" });
         }
 
         const validPassword = await bcrypt.compare(password, account.hash);
@@ -189,43 +190,44 @@ function setupSockets(io) {
           return safeCb(cb, { message: "Invalid birthday date" });
         }
 
-        const r = await createProfile(name);
+        // ✅ Pass password to createProfile so it hashes and saves correctly
+        const r = await createProfile(name, password);
         if (!r.success) {
           return safeCb(cb, { success: false, message: r.message || "Username is not appropriate" });
         }
 
         const id = r.user.id;
 
+        // ✅ UPDATE existing account/profile instead of overwriting
         data.registeredNames[lower] = true;
-        data.accounts[name] = {
-          id,
-          hash: await bcrypt.hash(password, 12),
-          joinDate: new Date().toISOString(),
-          theme: "light",
-          verified: false,
-          role: "user",
-          birthday: {
+
+        // Add extra fields to account
+        if (data.accounts[name]) {
+          data.accounts[name].joinDate = new Date().toISOString();
+          data.accounts[name].theme = "light";
+          data.accounts[name].verified = false;
+          data.accounts[name].birthday = {
             month: birthday.month,
             day: Number(birthday.day),
             year: Number(birthday.year)
-          }
-        };
+          };
+        }
 
+        // Add extra fields to profile
         if (data.userProfiles[name]) {
-  data.userProfiles[name].birthday = {
-    month: birthday.month,
-    day: Number(birthday.day),
-    year: Number(birthday.year)
-  };
-
-  data.userProfiles[name].isOnline = false;
-  data.userProfiles[name].lastOnline = null;
-}
+          data.userProfiles[name].birthday = {
+            month: birthday.month,
+            day: Number(birthday.day),
+            year: Number(birthday.year)
+          };
+          data.userProfiles[name].isOnline = false;
+          data.userProfiles[name].lastOnline = null;
+        }
 
         saveData();
         safeCb(cb, { success: true, username: name, id });
       } catch (e) {
-        console.error(e);
+        console.error("Signup Error:", e);
         safeCb(cb, { message: "Server error" });
       }
     });
@@ -315,7 +317,7 @@ function setupSockets(io) {
         }
 
         const account = data.accounts[name];
-        if (!account) return safeCb(cb, { message: "Account not found" });
+        if (!account || !account.hash) return safeCb(cb, { message: "Account not found" });
 
         if (typeof currentPassword !== 'string' || !(await bcrypt.compare(currentPassword, account.hash))) {
           return safeCb(cb, { message: "Current password is incorrect" });
