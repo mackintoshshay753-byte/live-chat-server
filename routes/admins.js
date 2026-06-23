@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { data, saveData } = require('../data');
-const { hasRole } = require('../permissions');
+const { hasRole } = require('./permissions');
 
 // Helper: resolve target from ID or username
 function resolveTarget(input) {
