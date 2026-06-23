@@ -19,9 +19,6 @@ const DEFAULT_DATA = {
 
 let data = { ...DEFAULT_DATA };
 
-// ----------------------
-// EXACT SAME SAVE/LOAD AS YOUR ORIGINAL + AUTO-OWNER
-// ----------------------
 function loadData() {
   if (!fs.existsSync(DATA_PATH)) {
     console.log("📄 No file — creating new");
@@ -33,11 +30,16 @@ function loadData() {
     const loaded = JSON.parse(raw);
     data = { ...DEFAULT_DATA, ...loaded };
 
-    // ✅ AUTO-SET YOU AS OWNER — NO MATTER THE USER ID
+    // ✅ AUTO-SET + SAVE OWNER PERMANENTLY
     const MY_OWNER_USERNAME = "sadieandshay87";
     if (data.accounts[MY_OWNER_USERNAME]) {
-      data.accounts[MY_OWNER_USERNAME].role = "owner";
-      console.log(`✅ ${MY_OWNER_USERNAME} confirmed as Owner`);
+      if (data.accounts[MY_OWNER_USERNAME].role !== "owner") {
+        data.accounts[MY_OWNER_USERNAME].role = "owner";
+        saveData(); // <-- THIS IS THE MISSING LINE
+        console.log(`✅ ${MY_OWNER_USERNAME} set and saved as Owner`);
+      } else {
+        console.log(`ℹ️ ${MY_OWNER_USERNAME} is already Owner`);
+      }
     } else {
       console.log(`ℹ️ ${MY_OWNER_USERNAME} not found yet — will become Owner when you sign up`);
     }
