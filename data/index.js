@@ -1,7 +1,6 @@
 const fs = require('fs');
 const path = require('path');
 
-// File is INSIDE data folder — clean, not loose
 const DATA_PATH = path.join(__dirname, 'chat-data.json');
 
 const DEFAULT_DATA = {
@@ -14,13 +13,14 @@ const DEFAULT_DATA = {
   friends: {},
   groups: [],
   nextGroupId: 1,
-  ads: []           // ✅ ADDED — stores all ads
+  ads: [],
+  moderationLogs: []
 };
 
 let data = { ...DEFAULT_DATA };
 
 // ----------------------
-// EXACT SAME SAVE/LOAD AS YOUR ORIGINAL
+// EXACT SAME SAVE/LOAD AS YOUR ORIGINAL + AUTO-OWNER
 // ----------------------
 function loadData() {
   if (!fs.existsSync(DATA_PATH)) {
@@ -32,7 +32,17 @@ function loadData() {
     const raw = fs.readFileSync(DATA_PATH, 'utf8');
     const loaded = JSON.parse(raw);
     data = { ...DEFAULT_DATA, ...loaded };
-    console.log("✅ Data loaded — ID 1 & all users preserved");
+
+    // ✅ AUTO-SET YOU AS OWNER — NO MATTER THE USER ID
+    const MY_OWNER_USERNAME = "sadieandshay87";
+    if (data.accounts[MY_OWNER_USERNAME]) {
+      data.accounts[MY_OWNER_USERNAME].role = "owner";
+      console.log(`✅ ${MY_OWNER_USERNAME} confirmed as Owner`);
+    } else {
+      console.log(`ℹ️ ${MY_OWNER_USERNAME} not found yet — will become Owner when you sign up`);
+    }
+
+    console.log("✅ Data loaded — all users preserved");
   } catch (err) {
     console.error("⚠️ Data read error — backup saved, starting fresh");
     if (fs.existsSync(DATA_PATH)) fs.renameSync(DATA_PATH, DATA_PATH + `.bak-${Date.now()}.json`);

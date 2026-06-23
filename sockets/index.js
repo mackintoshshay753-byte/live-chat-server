@@ -203,6 +203,7 @@ function setupSockets(io) {
           joinDate: new Date().toISOString(),
           theme: "light",
           verified: false,
+          role: "user",
           birthday: {
             month: birthday.month,
             day: Number(birthday.day),
