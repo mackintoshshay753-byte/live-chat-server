@@ -44,19 +44,19 @@ router.post("/request", (req, res) => {
   ensureUserStores(toId);
 
   if (areFriends(fromId, toId)) {
-    return res.status(409).json({ success: false, error: "Already friends" });
+    return res.status(409).json({ success: false });
   }
 
   if (data.friendRequests[toId].some(r => r.fromId === fromId)) {
-    return res.status(409).json({ success: false, error: "Already requested" });
+    return res.status(409).json({ success: false });
   }
 
   if (isAtFriendLimit(fromId)) {
-    return res.status(400).json({ success: false, error: "You have reached the 200 friend limit" });
+    return res.status(400).json({ success: false });
   }
 
   if (isAtFriendLimit(toId)) {
-    return res.status(400).json({ success: false, error: "That user has reached the 200 friend limit" });
+    return res.status(400).json({ success: false });
   }
 
   data.friendRequests[toId].push({
@@ -102,11 +102,11 @@ router.post("/accept", (req, res) => {
   }
 
   if (isAtFriendLimit(fromId)) {
-    return res.status(400).json({ success: false, error: "Sender has reached the 200 friend limit" });
+    return res.status(400).json({ success: false });
   }
 
   if (isAtFriendLimit(toId)) {
-    return res.status(400).json({ success: false, error: "Receiver has reached the 200 friend limit" });
+    return res.status(400).json({ success: false });
   }
 
   removeFriendRequest(fromId, toId);
