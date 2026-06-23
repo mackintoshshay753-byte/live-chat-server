@@ -104,43 +104,74 @@ function setupSockets(io) {
     });
 
     socket.on("login", async ({ username, password }, cb) => {
-      try {
-        const name = sanitizeUsername(username);
-        if (!name || typeof password !== 'string') {
-          return safeCb(cb, { message: "Invalid input" });
-        }
+  try {
+    const name = sanitizeUsername(username);
+    if (!name || typeof password !== 'string') {
+      return safeCb(cb, { success: false, message: "Invalid input" });
+    }
 
-        const rateCheck = checkRateLimit(`${name}:${clientIp}`);
-        if (!rateCheck.allowed) {
-          return safeCb(cb, { message: rateCheck.message });
-        }
+    const rateCheck = checkRateLimit(`${name}:${clientIp}`);
+    if (!rateCheck.allowed) {
+      return safeCb(cb, { message: rateCheck.message });
+    }
 
-        const lowerName = name.toLowerCase();
-        const account = data.accounts[name];
+    const lowerName = name.toLowerCase();
+    const account = data.accounts[name];
 
-        // ✅ Added safety check to prevent bcrypt crash
-        if (!account || !account.hash || !data.registeredNames[lowerName]) {
-          return safeCb(cb, { message: "Account not found or invalid" });
-        }
+    if (!account || !account.hash || !data.registeredNames[lowerName]) {
+      return safeCb(cb, { message: "Account not found" });
+    }
 
-        const validPassword = await bcrypt.compare(password, account.hash);
-        if (!validPassword) {
-          return safeCb(cb, { message: "Incorrect username or password" });
-        }
+    // ✅ BAN CHECK — NEW CODE HERE
+    if (account.banned === true) {
+      const now = new Date();
+      const banUntil = account.banUntil ? new Date(account.banUntil) : null;
+      let durationText = "Permanent";
+      let remaining = "";
 
-        loginAttempts.delete(`${name}:${clientIp}`);
-
-        safeCb(cb, {
-          success: true,
-          username: name,
-          id: account.id,
-          theme: account.theme || 'light'
-        });
-      } catch (err) {
-        console.error("Login Error:", err);
-        safeCb(cb, { message: "Server error — please try again later" });
+      if (banUntil && banUntil > now) {
+        const diffMs = banUntil - now;
+        const days = Math.floor(diffMs / 86400000);
+        const hours = Math.floor((diffMs % 86400000) / 3600000);
+        durationText = `${days}d ${hours}h`;
+        remaining = `Expires: ${banUntil.toLocaleString()}`;
+      } else if (banUntil && banUntil <= now) {
+        // Auto-unban if time is up
+        account.banned = false;
+        account.banReason = "";
+        account.banUntil = null;
+        saveData();
       }
+
+      return safeCb(cb, {
+        success: false,
+        banned: true,
+        message: "Your account is banned",
+        duration: durationText,
+        reason: account.banReason || "No reason given",
+        expires: banUntil ? banUntil.toISOString() : null
+      });
+    }
+    // ✅ END BAN CHECK
+
+    const validPassword = await bcrypt.compare(password, account.hash);
+    if (!validPassword) {
+      return safeCb(cb, { message: "Incorrect username or password" });
+    }
+
+    loginAttempts.delete(`${name}:${clientIp}`);
+
+    safeCb(cb, {
+      success: true,
+      username: name,
+      id: account.id,
+      theme: account.theme || 'light'
     });
+  } catch (err) {
+    console.error("Login Error:", err);
+    safeCb(cb, { message: "Server error — please try again later" });
+  }
+});
 
     socket.on("signup", async ({ username, password, birthday }, cb) => {
       try {
