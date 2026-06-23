@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { data, saveData } = require('../data');
 
-const MAX_FRIENDS = 200;
+const MAX_FRIENDS = 1;
 
 function parseId(value) {
   const num = Number(value);
