@@ -186,6 +186,7 @@ router.post('/unban', (req, res) => {
 });
 
 // Delete account → moves to archive
+// Delete account → moves to archive
 router.post('/delete-account', (req, res) => {
   try {
     const { actorId, target } = req.body;
@@ -195,18 +196,34 @@ router.post('/delete-account', (req, res) => {
     if (!hasRole(actorId, 'owner', data)) {
       return res.status(403).json({ success: false, error: 'Only owner can delete accounts' });
     }
+
     const actor = resolveTarget(actorId);
     const targetAcc = resolveTarget(target);
     if (!actor || !targetAcc) {
       return res.status(404).json({ success: false, error: 'Account not found' });
     }
+
+    const ACTUAL_OWNER_USERNAME = "sadieandshay87";
+
+    // ✅ Protection rule: Block deletion of ANY Owner EXCEPT the actual owner
+    if (targetAcc.role === 'owner') {
+      const targetUsername = Object.keys(data.accounts).find(k => data.accounts[k] === targetAcc);
+      if (targetUsername !== ACTUAL_OWNER_USERNAME) {
+        return res.status(403).json({
+          success: false,
+          error: 'Protected: Cannot delete other Owner accounts — only the main owner may be deleted if required'
+        });
+      }
+    }
+
+    // Prevent deleting your own account unless you are the actual owner
     if (isSelf(actorId, targetAcc)) {
-      return res.status(403).json({ success: false, error: 'You cannot delete your own account' });
+      const actorUsername = Object.keys(data.accounts).find(k => data.accounts[k] === actor);
+      if (actorUsername !== ACTUAL_OWNER_USERNAME) {
+        return res.status(403).json({ success: false, error: 'You cannot delete your own account' });
+      }
     }
-    const ownerCount = Object.values(data.accounts).filter(a => a.role === 'owner').length;
-    if (targetAcc.role === 'owner' && ownerCount <= 1) {
-      return res.status(403).json({ success: false, error: 'Cannot delete the only owner account' });
-    }
+
     const username = Object.keys(data.accounts).find(k => data.accounts[k] === targetAcc);
     if (!username) return res.status(404).json({ success: false, error: 'Account not found' });
 
@@ -235,6 +252,7 @@ router.post('/delete-account', (req, res) => {
     saveData();
     res.json({ success: true, message: 'Account deleted and archived' });
   } catch (err) {
+    console.error('Delete error:', err);
     res.status(500).json({ success: false, error: 'Server error' });
   }
 });
