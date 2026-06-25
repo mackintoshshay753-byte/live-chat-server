@@ -15,10 +15,12 @@ const DEFAULT_DATA = {
   groups: [],
   nextGroupId: 1,
   ads: [],
-  moderationLogs: []
+  moderationLogs: [],
+  deletedAccounts: {} // Added for archive
 };
 
 let data = { ...DEFAULT_DATA };
+const ACTUAL_OWNER_USERNAME = "sadieandshay87";
 
 function loadData() {
   if (!fs.existsSync(DATA_PATH)) {
@@ -32,31 +34,25 @@ function loadData() {
     const loaded = JSON.parse(raw);
     data = { ...DEFAULT_DATA, ...loaded };
 
-    // ✅ Sync roles from userProfiles into accounts
-    const MY_OWNER_USERNAME = "sadieandshay87";
-
-    // First: if exists in userProfiles, copy role to accounts
+    // Sync roles from userProfiles into accounts
     Object.entries(data.userProfiles || {}).forEach(([uname, prof]) => {
       if (!data.accounts[uname]) data.accounts[uname] = { id: prof.id };
-      // Keep role in sync
       data.accounts[uname].role = prof.role || "user";
     });
 
-    // ✅ Force owner role for your username
-    if (data.userProfiles[MY_OWNER_USERNAME]) {
-      if (data.userProfiles[MY_OWNER_USERNAME].role !== "owner") {
-        data.userProfiles[MY_OWNER_USERNAME].role = "owner";
-        data.accounts[MY_OWNER_USERNAME].role = "owner";
+    // Force main owner role
+    if (data.userProfiles[ACTUAL_OWNER_USERNAME]) {
+      if (data.userProfiles[ACTUAL_OWNER_USERNAME].role !== "owner") {
+        data.userProfiles[ACTUAL_OWNER_USERNAME].role = "owner";
+        data.accounts[ACTUAL_OWNER_USERNAME].role = "owner";
         saveData();
-        console.log(`✅ ${MY_OWNER_USERNAME} set and saved as Owner`);
-      } else {
-        console.log(`ℹ️ ${MY_OWNER_USERNAME} is already Owner`);
+        console.log(`✅ ${ACTUAL_OWNER_USERNAME} set as Owner`);
       }
     } else {
-      console.log(`ℹ️ ${MY_OWNER_USERNAME} not registered yet — will become Owner when you sign up`);
+      console.log(`ℹ️ ${ACTUAL_OWNER_USERNAME} will be Owner when registered`);
     }
 
-    console.log("✅ Data loaded successfully");
+    console.log("✅ Data loaded");
   } catch (err) {
     console.error("⚠️ Data error — starting fresh");
     if (fs.existsSync(DATA_PATH)) fs.renameSync(DATA_PATH, DATA_PATH + `.bak-${Date.now()}.json`);
@@ -73,9 +69,8 @@ function saveData() {
   }
 }
 
-// ✅ Automatically set role when you create your account
 function setRoleOnSignup(username, role = "user") {
-  return username === "sadieandshay87" ? "owner" : role;
+  return username === ACTUAL_OWNER_USERNAME ? "owner" : role;
 }
 
-module.exports = { data, loadData, saveData, setRoleOnSignup };
+module.exports = { data, loadData, saveData, setRoleOnSignup, ACTUAL_OWNER_USERNAME };

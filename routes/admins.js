@@ -18,7 +18,7 @@ function resolveTarget(input) {
   return byName || null;
 }
 
-// ✅ UPDATED: Now finds deleted accounts by BOTH ID and username
+// Find deleted accounts by BOTH ID and username
 function resolveDeletedTarget(input) {
   if (!input) return null;
   const numId = Number(input);
@@ -32,7 +32,7 @@ function resolveDeletedTarget(input) {
   return data.deletedAccounts[username] || null;
 }
 
-// Helper: check if target is the same as actor
+// Check if target is the same as actor
 function isSelf(actorId, target) {
   return Number(actorId) === Number(target.id);
 }
@@ -186,7 +186,6 @@ router.post('/unban', (req, res) => {
 });
 
 // Delete account → moves to archive
-// Delete account → moves to archive
 router.post('/delete-account', (req, res) => {
   try {
     const { actorId, target } = req.body;
@@ -204,48 +203,48 @@ router.post('/delete-account', (req, res) => {
     }
 
     const ACTUAL_OWNER_USERNAME = "sadieandshay87";
+    const actorUsername = Object.keys(data.accounts).find(k => data.accounts[k] === actor);
+    const targetUsername = Object.keys(data.accounts).find(k => data.accounts[k] === targetAcc);
+    const isMainOwner = actorUsername === ACTUAL_OWNER_USERNAME;
 
-    // ✅ Protection rule: Block deletion of ANY Owner EXCEPT the actual owner
-    if (targetAcc.role === 'owner') {
-      const targetUsername = Object.keys(data.accounts).find(k => data.accounts[k] === targetAcc);
-      if (targetUsername !== ACTUAL_OWNER_USERNAME) {
+    // ❌ Rule 1: No one can delete their own account
+    if (isSelf(actorId, targetAcc)) {
+      return res.status(403).json({ success: false, error: 'You cannot delete your own account' });
+    }
+
+    // ✅ Rule 2: If you are MAIN OWNER → can delete ANYONE except yourself
+    if (!isMainOwner) {
+      // ✅ Rule 3: If you are ANY OTHER OWNER → can only delete regular USERS
+      if (targetAcc.role !== 'user') {
         return res.status(403).json({
           success: false,
-          error: 'Protected: Cannot delete other Owner accounts — only the main owner may be deleted if required'
+          error: 'You can only delete regular user accounts — cannot delete moderators, admins or other owners'
         });
       }
     }
 
-    // Prevent deleting your own account unless you are the actual owner
-    if (isSelf(actorId, targetAcc)) {
-      const actorUsername = Object.keys(data.accounts).find(k => data.accounts[k] === actor);
-      if (actorUsername !== ACTUAL_OWNER_USERNAME) {
-        return res.status(403).json({ success: false, error: 'You cannot delete your own account' });
-      }
-    }
-
-    const username = Object.keys(data.accounts).find(k => data.accounts[k] === targetAcc);
-    if (!username) return res.status(404).json({ success: false, error: 'Account not found' });
-
     // Save to archive
-    data.deletedAccounts[username] = {
+    data.deletedAccounts[targetUsername] = {
       account: { ...targetAcc },
-      profile: { ...data.userProfiles[username] || {} },
-      registeredName: data.registeredNames[username.toLowerCase()] || null,
-      idMap: data.usernameToId[username] || null,
-      deletedAt: new Date().toISOString()
+      profile: { ...data.userProfiles[targetUsername] || {} },
+      registeredName: data.registeredNames[targetUsername.toLowerCase()] || null,
+      idMap: data.usernameToId[targetUsername] || null,
+      deletedAt: new Date().toISOString(),
+      deletedBy: actorUsername
     };
 
     // Remove from active data
-    delete data.accounts[username];
-    delete data.userProfiles[username];
-    delete data.registeredNames[username.toLowerCase()];
-    delete data.usernameToId[username];
+    delete data.accounts[targetUsername];
+    delete data.userProfiles[targetUsername];
+    delete data.registeredNames[targetUsername.toLowerCase()];
+    delete data.usernameToId[targetUsername];
 
     data.moderationLogs.push({
       type: 'DELETE_ACCOUNT',
       actorId,
+      actorName: actorUsername,
       targetId: targetAcc.id,
+      targetName: targetUsername,
       timestamp: new Date().toISOString()
     });
 
@@ -257,7 +256,7 @@ router.post('/delete-account', (req, res) => {
   }
 });
 
-// ✅ Recover Deleted Account — now works with ID or username
+// Recover Deleted Account — works with ID or username
 router.post('/recover-account', (req, res) => {
   try {
     const { actorId, target } = req.body;
@@ -273,7 +272,6 @@ router.post('/recover-account', (req, res) => {
       return res.status(404).json({ success: false, error: 'Deleted account not found — check ID or username' });
     }
 
-    // Find the matching username key in deletedAccounts
     const username = Object.keys(data.deletedAccounts).find(k => data.deletedAccounts[k] === deletedEntry);
     if (!username) {
       return res.status(404).json({ success: false, error: 'Could not locate account in archive' });
