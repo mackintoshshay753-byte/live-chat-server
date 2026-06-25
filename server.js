@@ -13,13 +13,13 @@ const PORT = process.env.PORT || 3000;
 const ALLOWED_ORIGINS = ["https://idontknowww.neocities.org"];
 
 // --------------------------
-// Security & Headers
+// Security Headers
 // --------------------------
 app.use(helmet({
-  contentSecurityPolicy: false // Disable if you serve mixed content
+  contentSecurityPolicy: false // Disable if you use mixed content
 }));
 
-// Remove strict cross-origin policies for static assets
+// Remove conflicting cross-origin headers
 app.use((req, res, next) => {
   res.removeHeader("Cross-Origin-Resource-Policy");
   res.removeHeader("Cross-Origin-Embedder-Policy");
@@ -27,21 +27,12 @@ app.use((req, res, next) => {
   next();
 });
 
-// Rate limiting
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 300, // limit each IP
-  standardHeaders: true,
-  legacyHeaders: false
-});
-app.use(limiter);
-
 // --------------------------
-// CORS Configuration
+// CORS Configuration (FIXED)
 // --------------------------
 app.use(cors({
   origin: function (origin, callback) {
-    // Allow requests with no origin (e.g. Postman, server-to-server)
+    // Allow requests with no origin (e.g. server-to-server, Postman)
     if (!origin) return callback(null, true);
     if (ALLOWED_ORIGINS.includes(origin)) {
       return callback(null, true);
@@ -53,14 +44,20 @@ app.use(cors({
   allowedHeaders: ["Content-Type", "Authorization"]
 }));
 
-// Handle preflight OPTIONS requests
+// Handle preflight requests
 app.options("*", cors());
 
-// Set explicit allow origin for assets
-app.use((req, res, next) => {
-  res.setHeader("Access-Control-Allow-Origin", ALLOWED_ORIGINS[0]);
-  next();
+// --------------------------
+// Rate Limiter (FIXED)
+// --------------------------
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 1000, // Higher limit to avoid 429 errors
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, error: "Too many requests — please slow down" }
 });
+app.use(limiter);
 
 // --------------------------
 // Parsers & Static Files
@@ -70,8 +67,7 @@ app.use(express.urlencoded({ extended: true }));
 
 app.use(express.static(path.join(__dirname, 'public'), {
   etag: true,
-  maxAge: '1h',
-  immutable: false
+  maxAge: '1h'
 }));
 
 // --------------------------
