@@ -36,27 +36,31 @@ router.post("/request", (req, res) => {
   const toId = parseId(req.body.toId);
   const fromUsername = String(req.body.fromUsername || '').trim();
 
+  // ✅ Already checks self, but made it clearer + added error message
   if (fromId === null || toId === null || fromId === toId || !fromUsername) {
-    return res.status(400).json({ success: false, error: "Invalid request" });
+    return res.status(400).json({ 
+      success: false, 
+      error: fromId === toId ? "You cannot send a friend request to yourself" : "Invalid request" 
+    });
   }
 
   ensureUserStores(fromId);
   ensureUserStores(toId);
 
   if (areFriends(fromId, toId)) {
-    return res.status(409).json({ success: false });
+    return res.status(409).json({ success: false, error: "Already friends" });
   }
 
   if (data.friendRequests[toId].some(r => r.fromId === fromId)) {
-    return res.status(409).json({ success: false });
+    return res.status(409).json({ success: false, error: "Request already sent" });
   }
 
   if (isAtFriendLimit(fromId)) {
-    return res.status(400).json({ success: false });
+    return res.status(400).json({ success: false, error: "You have reached the maximum number of friends" });
   }
 
   if (isAtFriendLimit(toId)) {
-    return res.status(400).json({ success: false });
+    return res.status(400).json({ success: false, error: "This user has reached the maximum number of friends" });
   }
 
   data.friendRequests[toId].push({
@@ -83,8 +87,12 @@ router.post("/accept", (req, res) => {
   const fromId = parseId(req.body.fromId);
   const toId = parseId(req.body.toId);
 
+  // ✅ Block accepting from yourself
   if (fromId === null || toId === null || fromId === toId) {
-    return res.status(400).json({ success: false, error: "Invalid request" });
+    return res.status(400).json({ 
+      success: false, 
+      error: fromId === toId ? "You cannot accept a request from yourself" : "Invalid request" 
+    });
   }
 
   ensureUserStores(fromId);
@@ -102,11 +110,11 @@ router.post("/accept", (req, res) => {
   }
 
   if (isAtFriendLimit(fromId)) {
-    return res.status(400).json({ success: false });
+    return res.status(400).json({ success: false, error: "Sender has reached maximum friends" });
   }
 
   if (isAtFriendLimit(toId)) {
-    return res.status(400).json({ success: false });
+    return res.status(400).json({ success: false, error: "You have reached maximum friends" });
   }
 
   removeFriendRequest(fromId, toId);
@@ -123,8 +131,12 @@ router.post("/reject", (req, res) => {
   const fromId = parseId(req.body.fromId);
   const toId = parseId(req.body.toId);
 
-  if (fromId === null || toId === null) {
-    return res.status(400).json({ success: false, error: "Invalid request" });
+  // ✅ Block rejecting self
+  if (fromId === null || toId === null || fromId === toId) {
+    return res.status(400).json({ 
+      success: false, 
+      error: fromId === toId ? "Invalid request" : "Invalid request" 
+    });
   }
 
   ensureUserStores(toId);
@@ -143,8 +155,12 @@ router.post("/unfriend", (req, res) => {
   const userId = parseId(req.body.userId);
   const friendId = parseId(req.body.friendId);
 
+  // ✅ Block unfriending yourself
   if (userId === null || friendId === null || userId === friendId) {
-    return res.status(400).json({ success: false, error: "Invalid request" });
+    return res.status(400).json({ 
+      success: false, 
+      error: userId === friendId ? "You cannot unfriend yourself" : "Invalid request" 
+    });
   }
 
   ensureUserStores(userId);
@@ -178,7 +194,6 @@ router.get("/outgoing/:userId", (req, res) => {
 
   ensureUserStores(userId);
 
-  // Find every request where this user is the sender
   const outgoing = [];
   for (const receiverId in data.friendRequests) {
     const requests = data.friendRequests[receiverId];
