@@ -172,4 +172,24 @@ router.get("/list/:userId", (req, res) => {
   res.json({ friends });
 });
 
+router.get("/outgoing/:userId", (req, res) => {
+  const userId = parseId(req.params.userId);
+  if (userId === null) return res.status(400).json({ outgoing: [] });
+
+  ensureUserStores(userId);
+
+  // Find every request where this user is the sender
+  const outgoing = [];
+  for (const receiverId in data.friendRequests) {
+    const requests = data.friendRequests[receiverId];
+    for (const req of requests) {
+      if (req.fromId === userId) {
+        outgoing.push({ toId: Number(receiverId), timestamp: req.timestamp });
+      }
+    }
+  }
+
+  res.json({ outgoing });
+});
+
 module.exports = router;
