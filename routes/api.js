@@ -22,6 +22,7 @@ router.get("/profile/:id", (req, res) => {
       ...profile,
       bio: profile.bio ?? "",
       birthday: profile.birthday ?? null,
+      gender: profile.gender ?? null,
       status: profile.status ?? ""
     });
 
