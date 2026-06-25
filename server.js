@@ -9,15 +9,17 @@ const rateLimit = require('express-rate-limit');
 const app = express();
 const server = http.createServer(app);
 
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 const ALLOWED_ORIGINS = ["https://idontknowww.neocities.org"];
 
-// Security headers
+// --------------------------
+// Security & Headers
+// --------------------------
 app.use(helmet({
-  contentSecurityPolicy: false
+  contentSecurityPolicy: false // Disable if you serve mixed content
 }));
 
-// Remove Helmet CORP/COEP for static files (fixes images)
+// Remove strict cross-origin policies for static assets
 app.use((req, res, next) => {
   res.removeHeader("Cross-Origin-Resource-Policy");
   res.removeHeader("Cross-Origin-Embedder-Policy");
@@ -25,53 +27,75 @@ app.use((req, res, next) => {
   next();
 });
 
-// Basic rate limiting
-app.use(rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 300,
+// Rate limiting
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 300, // limit each IP
   standardHeaders: true,
   legacyHeaders: false
-}));
+});
+app.use(limiter);
 
-// CORS
+// --------------------------
+// CORS Configuration
+// --------------------------
 app.use(cors({
-  origin: ALLOWED_ORIGINS,
+  origin: function (origin, callback) {
+    // Allow requests with no origin (e.g. Postman, server-to-server)
+    if (!origin) return callback(null, true);
+    if (ALLOWED_ORIGINS.includes(origin)) {
+      return callback(null, true);
+    }
+    return callback(new Error("Not allowed by CORS"), false);
+  },
   credentials: true,
-  methods: ["GET", "POST", "DELETE", "PUT", "PATCH", "OPTIONS"]
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"]
 }));
 
+// Handle preflight OPTIONS requests
 app.options("*", cors());
 
-// Allow images to load cross-origin
+// Set explicit allow origin for assets
 app.use((req, res, next) => {
-  res.header("Access-Control-Allow-Origin", ALLOWED_ORIGINS[0]);
+  res.setHeader("Access-Control-Allow-Origin", ALLOWED_ORIGINS[0]);
   next();
 });
 
-// Body parser
+// --------------------------
+// Parsers & Static Files
+// --------------------------
 app.use(express.json({ limit: '10kb' }));
+app.use(express.urlencoded({ extended: true }));
 
-// Static files
 app.use(express.static(path.join(__dirname, 'public'), {
   etag: true,
   maxAge: '1h',
-  immutable: true
+  immutable: false
 }));
 
+// --------------------------
 // Socket.io
+// --------------------------
 const io = new Server(server, {
-  cors: { origin: ALLOWED_ORIGINS, credentials: true }
+  cors: {
+    origin: ALLOWED_ORIGINS,
+    credentials: true
+  }
 });
 
-// Load data
+// --------------------------
+// Load Data & Sockets
+// --------------------------
 const { loadData } = require('./data');
 loadData();
 
-// Sockets
 const setupSockets = require('./sockets');
 setupSockets(io);
 
+// --------------------------
 // Routes
+// --------------------------
 app.use('/api', require('./routes/api'));
 app.use('/api/friends', require('./routes/friendsapi'));
 app.use('/api/groups', require('./routes/groupsapi'));
@@ -79,4 +103,10 @@ app.use('/api/messages', require('./routes/messagesapi'));
 app.use('/api/admin', require('./routes/admins'));
 app.use('/', require('./routes/pages'));
 
-server.listen(PORT, () => console.log("✅ Server running on port", PORT));
+// --------------------------
+// Start Server
+// --------------------------
+server.listen(PORT, () => {
+  console.log(`✅ Server running on port ${PORT}`);
+  console.log(`🌐 Allowed origin: ${ALLOWED_ORIGINS[0]}`);
+});
