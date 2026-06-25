@@ -173,95 +173,96 @@ function setupSockets(io) {
   }
 });
 
-    socket.on("signup", async ({ username, password, birthday }, cb) => {
-      try {
-        const name = sanitizeUsername(username);
-        if (!name) return safeCb(cb, { message: "Invalid username format" });
+    socket.on("signup", async ({ username, password, birthday, gender }, cb) => {
+  try {
+    const name = sanitizeUsername(username);
+    if (!name) return safeCb(cb, { message: "Invalid username format" });
 
-        const lower = name.toLowerCase();
+    const lower = name.toLowerCase();
 
-        if (name.length < 3 || name.length > 20 || /\s/.test(name) || !/^[a-zA-Z0-9_]+$/.test(name)) {
-          return safeCb(cb, { message: "Invalid username format" });
-        }
+    if (name.length < 3 || name.length > 20 || /\s/.test(name) || !/^[a-zA-Z0-9_]+$/.test(name)) {
+      return safeCb(cb, { message: "Invalid username format" });
+    }
 
-        if (data.registeredNames[lower]) {
-          return safeCb(cb, { message: "Username already taken" });
-        }
+    if (data.registeredNames[lower]) {
+      return safeCb(cb, { message: "Username already taken" });
+    }
 
-        if (!isStrongPassword(password)) {
-          return safeCb(cb, { message: "Password must be 8+ chars with letters + numbers" });
-        }
+    if (!isStrongPassword(password)) {
+      return safeCb(cb, { message: "Password must be 8+ chars with letters + numbers" });
+    }
 
-        if (
-          !birthday ||
-          typeof birthday.month !== 'string' ||
-          !birthday.month ||
-          !birthday.day ||
-          !birthday.year
-        ) {
-          return safeCb(cb, { message: "Birthday is required" });
-        }
+    if (!["Male", "Female"].includes(gender)) {
+      return safeCb(cb, { message: "Gender is required" });
+    }
 
-        const monthNames = [
-          "January","February","March","April","May","June",
-          "July","August","September","October","November","December"
-        ];
+    if (
+      !birthday ||
+      typeof birthday.month !== "string" ||
+      !birthday.month ||
+      !birthday.day ||
+      !birthday.year
+    ) {
+      return safeCb(cb, { message: "Birthday is required" });
+    }
 
-        if (!monthNames.includes(birthday.month)) {
-          return safeCb(cb, { message: "Invalid birthday month" });
-        }
+    const monthNames = [
+      "January","February","March","April","May","June",
+      "July","August","September","October","November","December"
+    ];
 
-        const monthIndex = monthNames.indexOf(birthday.month);
-        const testDate = new Date(Number(birthday.year), monthIndex, Number(birthday.day));
-        if (
-          testDate.getFullYear() !== Number(birthday.year) ||
-          testDate.getMonth() !== monthIndex ||
-          testDate.getDate() !== Number(birthday.day)
-        ) {
-          return safeCb(cb, { message: "Invalid birthday date" });
-        }
+    if (!monthNames.includes(birthday.month)) {
+      return safeCb(cb, { message: "Invalid birthday month" });
+    }
 
-        // ✅ Pass password to createProfile so it hashes and saves correctly
-        const r = await createProfile(name, password);
-        if (!r.success) {
-          return safeCb(cb, { success: false, message: r.message || "Username is not appropriate" });
-        }
+    const monthIndex = monthNames.indexOf(birthday.month);
+    const testDate = new Date(Number(birthday.year), monthIndex, Number(birthday.day));
+    if (
+      testDate.getFullYear() !== Number(birthday.year) ||
+      testDate.getMonth() !== monthIndex ||
+      testDate.getDate() !== Number(birthday.day)
+    ) {
+      return safeCb(cb, { message: "Invalid birthday date" });
+    }
 
-        const id = r.user.id;
+    const r = await createProfile(name, password);
+    if (!r.success) {
+      return safeCb(cb, { success: false, message: r.message || "Username is not appropriate" });
+    }
 
-        // ✅ UPDATE existing account/profile instead of overwriting
-        data.registeredNames[lower] = true;
+    const id = r.user.id;
+    data.registeredNames[lower] = true;
 
-        // Add extra fields to account
-        if (data.accounts[name]) {
-          data.accounts[name].joinDate = new Date().toISOString();
-          data.accounts[name].theme = "light";
-          data.accounts[name].verified = false;
-          data.accounts[name].birthday = {
-            month: birthday.month,
-            day: Number(birthday.day),
-            year: Number(birthday.year)
-          };
-        }
+    if (data.accounts[name]) {
+      data.accounts[name].joinDate = new Date().toISOString();
+      data.accounts[name].theme = "light";
+      data.accounts[name].verified = false;
+      data.accounts[name].birthday = {
+        month: birthday.month,
+        day: Number(birthday.day),
+        year: Number(birthday.year)
+      };
+      data.accounts[name].gender = gender;
+    }
 
-        // Add extra fields to profile
-        if (data.userProfiles[name]) {
-          data.userProfiles[name].birthday = {
-            month: birthday.month,
-            day: Number(birthday.day),
-            year: Number(birthday.year)
-          };
-          data.userProfiles[name].isOnline = false;
-          data.userProfiles[name].lastOnline = null;
-        }
+    if (data.userProfiles[name]) {
+      data.userProfiles[name].birthday = {
+        month: birthday.month,
+        day: Number(birthday.day),
+        year: Number(birthday.year)
+      };
+      data.userProfiles[name].gender = gender;
+      data.userProfiles[name].isOnline = false;
+      data.userProfiles[name].lastOnline = null;
+    }
 
-        saveData();
-        safeCb(cb, { success: true, username: name, id });
-      } catch (e) {
-        console.error("Signup Error:", e);
-        safeCb(cb, { message: "Server error" });
-      }
-    });
+    saveData();
+    safeCb(cb, { success: true, username: name, id, gender });
+  } catch (e) {
+    console.error("Signup Error:", e);
+    safeCb(cb, { message: "Server error" });
+  }
+});
 
     socket.on("save-theme", ({ theme, username }, cb) => {
       try {
