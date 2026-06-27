@@ -44,6 +44,33 @@ const upload = multer({
 });
 
 // ==================================================
+// AUTH HELPER
+// ==================================================
+// NOTE: This app has no server-side session (no express-session,
+// no req.session anywhere) — login state lives in localStorage on
+// the client, and every request just sends a plain `userId` field.
+// That means real spoof-proofing isn't possible without adding
+// express-session + cookie-based login (separate task).
+//
+// What we CAN do here: verify the claimed userId actually belongs
+// to a real, existing account before using it for any ownership
+// check. This stops "made up" IDs and keeps the data layer honest,
+// even though it can't stop someone claiming another real user's ID
+// without a session to verify against.
+function findAccountById(userId) {
+  const uid = Number(userId);
+  if (!uid || !data.accounts || typeof data.accounts !== 'object') return null;
+
+  const entry = Object.entries(data.accounts).find(
+    ([, acc]) => Number(acc?.id) === uid
+  );
+  if (!entry) return null;
+
+  const [username, acc] = entry;
+  return { username, id: Number(acc.id), role: acc.role || "user" };
+}
+
+// ==================================================
 // GLOBAL USERNAME SYNC
 // ==================================================
 function buildUserMap() {
@@ -111,7 +138,7 @@ router.get("/debug-accounts", (req, res) => {
     accountsType: Array.isArray(data.accounts) ? 'array' : typeof data.accounts,
     accountsSample: Array.isArray(data.accounts)
       ? data.accounts.slice(0, 3)
-      : Object.entries(data.accounts || {}).slice(0, 3).map(([k,v]) => ({ key: k, value: v })),
+      : Object.entries(data.accounts || {}).slice(0, 3).map(([k, v]) => ({ key: k, value: v })),
     usersType: Array.isArray(data.users) ? 'array' : typeof data.users,
   });
 });
@@ -158,11 +185,16 @@ router.post("/sync", (req, res) => {
 // ----------------------
 router.post("/create", upload.single('groupIcon'), (req, res) => {
   try {
-    let { name, description, createdBy, createdById } = req.body;
+    let { name, description, createdById } = req.body;
     name = (name || "").trim();
     description = (description || "").trim();
-    createdBy = (createdBy || "Unknown").trim();
-    createdById = Number(createdById) || 0;
+
+    // ✅ Verify the account is real instead of trusting createdBy text blindly
+    const account = findAccountById(createdById);
+    if (!account) {
+      if (req.file) fs.unlinkSync(req.file.path);
+      return res.json({ success: false, error: "Invalid or unknown user" });
+    }
 
     if (name.length < 3) {
       if (req.file) fs.unlinkSync(req.file.path);
@@ -177,11 +209,11 @@ router.post("/create", upload.single('groupIcon'), (req, res) => {
       id: data.nextGroupId++,
       name,
       iconUrl,
-      createdBy,
-      createdById,
+      createdBy: account.username,
+      createdById: account.id,
       description: description.slice(0, 500),
       createdDate: new Date().toISOString(),
-      members: [{ userId: createdById, username: createdBy, role: "owner" }],
+      members: [{ userId: account.id, username: account.username, role: "owner" }],
       wallPosts: []
     };
 
@@ -265,11 +297,14 @@ router.post("/:id/join", (req, res) => {
   try {
     const groupId = Number(req.params.id);
     const userId = Number(req.body.userId);
-    const { username } = req.body;
 
-    if (isNaN(groupId) || isNaN(userId) || !username?.trim()) {
+    if (isNaN(groupId) || isNaN(userId)) {
       return res.json({ success: false, error: "Missing or invalid user data" });
     }
+
+    // ✅ Verify account exists, use its real username (don't trust client-typed username)
+    const account = findAccountById(userId);
+    if (!account) return res.json({ success: false, error: "Invalid or unknown user" });
 
     const group = data.groups.find(g => g.id === groupId);
     if (!group) return res.json({ success: false, error: "Group not found" });
@@ -279,7 +314,7 @@ router.post("/:id/join", (req, res) => {
       return res.json({ success: false, error: "You are already a member of this group" });
     }
 
-    group.members.push({ userId, username: username.trim(), role: "member" });
+    group.members.push({ userId, username: account.username, role: "member" });
     saveData();
     res.json({ success: true });
 
@@ -294,6 +329,8 @@ router.post("/:id/join", (req, res) => {
 router.post("/:id/update-icon", upload.single('groupIcon'), (req, res) => {
   try {
     const groupId = Number(req.params.id);
+    const userId = Number(req.body.userId);
+
     if (isNaN(groupId)) {
       if (req.file) fs.unlinkSync(req.file.path);
       return res.json({ success: false, error: "Invalid group ID" });
@@ -303,6 +340,12 @@ router.post("/:id/update-icon", upload.single('groupIcon'), (req, res) => {
     if (!group) {
       if (req.file) fs.unlinkSync(req.file.path);
       return res.json({ success: false, error: "Group not found" });
+    }
+
+    // ✅ Only the owner can change the icon
+    if (Number(group.createdById) !== userId) {
+      if (req.file) fs.unlinkSync(req.file.path);
+      return res.json({ success: false, error: "Only the group owner can update the icon" });
     }
 
     if (!req.file) return res.json({ success: false, error: "No image uploaded" });
@@ -328,10 +371,17 @@ router.post("/:id/update-icon", upload.single('groupIcon'), (req, res) => {
 router.post("/:id/update-description", (req, res) => {
   try {
     const groupId = Number(req.params.id);
+    const userId = Number(req.body.userId);
     if (isNaN(groupId)) return res.json({ success: false, error: "Invalid group ID" });
 
     const group = data.groups.find(g => g.id === groupId);
     if (!group) return res.json({ success: false, error: "Group not found" });
+
+    // ✅ Only the owner can update the description
+    if (Number(group.createdById) !== userId) {
+      return res.json({ success: false, error: "Only the group owner can update the description" });
+    }
+
     group.description = (req.body.description || "").trim().slice(0, 500);
     saveData();
     res.json({ success: true });
@@ -347,6 +397,7 @@ router.post("/:id/update-description", (req, res) => {
 router.post("/:id/change-owner", (req, res) => {
   try {
     const groupId = Number(req.params.id);
+    const requesterId = Number(req.body.userId);
     const newOwnerId = Number(req.body.newOwnerId);
 
     if (isNaN(groupId) || isNaN(newOwnerId)) return res.json({ success: false, error: "Invalid ID" });
@@ -354,6 +405,11 @@ router.post("/:id/change-owner", (req, res) => {
     const group = data.groups.find(g => g.id === groupId);
     if (!group) return res.json({ success: false, error: "Group not found" });
     if (!Array.isArray(group.members)) return res.json({ success: false, error: "Member list missing" });
+
+    // ✅ Only the current owner can transfer ownership
+    if (Number(group.createdById) !== requesterId) {
+      return res.json({ success: false, error: "Only the group owner can transfer ownership" });
+    }
 
     const newOwner = group.members.find(m => m.userId === newOwnerId);
     if (!newOwner) return res.json({ success: false, error: "User is not in this group" });
@@ -400,11 +456,15 @@ router.post("/:id/wall/create", (req, res) => {
   try {
     const groupId = Number(req.params.id);
     const userId = Number(req.body.userId);
-    const { username, avatar, message } = req.body;
+    const { message } = req.body;
 
-    if (isNaN(groupId) || isNaN(userId) || !username?.trim() || !message?.trim()) {
+    if (isNaN(groupId) || isNaN(userId) || !message?.trim()) {
       return res.json({ success: false, error: "Missing required fields" });
     }
+
+    // ✅ Verify account exists, use its real username/avatar context (not client-supplied)
+    const account = findAccountById(userId);
+    if (!account) return res.json({ success: false, error: "Invalid or unknown user" });
 
     const group = data.groups.find(g => g.id === groupId);
     if (!group) return res.json({ success: false, error: "Group not found" });
@@ -417,8 +477,8 @@ router.post("/:id/wall/create", (req, res) => {
     group.wallPosts.push({
       id: Date.now(),
       userId,
-      username: username.trim(),
-      avatar: avatar || "",
+      username: account.username,
+      avatar: req.body.avatar || "",
       message: message.trim().slice(0, 450),
       createdAt: new Date().toISOString()
     });
@@ -452,8 +512,8 @@ router.delete("/:groupId/wall/:postId", (req, res) => {
     if (postIndex === -1) return res.json({ success: false, error: "Post not found" });
 
     const post = group.wallPosts[postIndex];
-    const isOwner = group.createdById === userId;
-    const isAuthor = post.userId === userId;
+    const isOwner = Number(group.createdById) === userId;
+    const isAuthor = Number(post.userId) === userId;
 
     if (!isOwner && !isAuthor) return res.json({ success: false, error: "No permission to delete" });
 
@@ -490,6 +550,12 @@ router.post("/:id/ads/create", upload.single('adImage'), (req, res) => {
     const group = data.groups.find(g => g.id === groupId);
     if (!group) { fs.unlinkSync(req.file.path); return res.json({ success: false, error: "Group not found" }); }
 
+    // ✅ Only the group owner can create ads for the group
+    if (Number(group.createdById) !== createdById) {
+      fs.unlinkSync(req.file.path);
+      return res.json({ success: false, error: "Only the group owner can create ads for this group" });
+    }
+
     if (!Array.isArray(data.ads)) data.ads = [];
 
     data.ads.push({
@@ -503,8 +569,8 @@ router.post("/:id/ads/create", upload.single('adImage'), (req, res) => {
       imageUrl: "/uploads/groups/" + req.file.filename,
       createdDate: new Date().toISOString(),
       active: true,
-      impressions: 0, // ✅ Added for stats
-      clicks: 0       // ✅ Added for stats
+      impressions: 0,
+      clicks: 0
     });
 
     saveData();
@@ -536,7 +602,7 @@ router.get("/ads/random", (req, res) => {
 });
 
 // ----------------------
-// ✅ NEW: ADS - GET MY ADS (FOR STATS)
+// ADS - GET MY ADS (FOR STATS)
 // ----------------------
 router.get("/ads/mine", (req, res) => {
   try {
@@ -552,7 +618,7 @@ router.get("/ads/mine", (req, res) => {
 });
 
 // ----------------------
-// ✅ NEW: ADS - TRACK IMPRESSION
+// ADS - TRACK IMPRESSION
 // ----------------------
 router.post("/ads/:id/impression", (req, res) => {
   try {
@@ -572,7 +638,7 @@ router.post("/ads/:id/impression", (req, res) => {
 });
 
 // ----------------------
-// ✅ NEW: ADS - TRACK CLICK
+// ADS - TRACK CLICK
 // ----------------------
 router.post("/ads/:id/click", (req, res) => {
   try {
@@ -591,25 +657,36 @@ router.post("/ads/:id/click", (req, res) => {
   }
 });
 
-// Add this to your ads router
+// ----------------------
+// ADS - TOGGLE ACTIVE
+// ----------------------
 router.post("/ads/:id/toggle", (req, res) => {
   try {
-    const ad = data.ads.find(a => a.id === Number(req.params.id));
-    if (ad) {
-      ad.active = !ad.active;
-      saveData();
-      res.sendStatus(200);
-    } else res.sendStatus(404);
-  } catch (err) { res.sendStatus(500); }
+    const adId = Number(req.params.id);
+    const userId = Number(req.body.userId);
+    const ad = data.ads.find(a => a.id === adId);
+    if (!ad) return res.sendStatus(404);
+
+    // ✅ Only the ad's creator can toggle it
+    if (Number(ad.createdById) !== userId) return res.sendStatus(403);
+
+    ad.active = !ad.active;
+    saveData();
+    res.sendStatus(200);
+  } catch (err) {
+    res.sendStatus(500);
+  }
 });
 
+// ----------------------
+// GET GROUPS FOR A USER (profile page showcase)
+// ----------------------
 router.get("/user/:userId", (req, res) => {
   try {
     const userId = Number(req.params.userId);
     if (isNaN(userId)) return res.json({ groups: [] });
 
-    // Find all groups where this user is a member
-    const userGroups = data.groups.filter(group => 
+    const userGroups = data.groups.filter(group =>
       Array.isArray(group.members) && group.members.some(m => Number(m.userId) === userId)
     );
 
@@ -620,6 +697,9 @@ router.get("/user/:userId", (req, res) => {
   }
 });
 
+// ----------------------
+// SHOUT - GET
+// ----------------------
 router.get("/:id/shout", (req, res) => {
   try {
     const groupId = Number(req.params.id);
@@ -632,6 +712,9 @@ router.get("/:id/shout", (req, res) => {
   }
 });
 
+// ----------------------
+// SHOUT - SET (owner only)
+// ----------------------
 router.post("/:id/shout", (req, res) => {
   try {
     const groupId = Number(req.params.id), userId = Number(req.body.userId);
