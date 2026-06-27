@@ -13,7 +13,21 @@ const PORT = process.env.PORT || 3000;
 const ALLOWED_ORIGINS = ["https://idontknowww.neocities.org"];
 
 // --------------------------
-// 1. Security — Lightweight, no blocking
+// 1. CORS — MUST run before helmet so headers always attach
+// --------------------------
+app.use(cors({
+  origin: ALLOWED_ORIGINS,
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"]
+}));
+// NOTE: no separate app.options("*", cors()) needed —
+// the cors middleware above already auto-handles OPTIONS preflight
+// for every route. The old "*" string route was likely silently
+// failing to register and breaking preflight requests.
+
+// --------------------------
+// 2. Security — Lightweight, no blocking
 // --------------------------
 app.use(helmet({
   contentSecurityPolicy: false,
@@ -24,17 +38,6 @@ app.use(helmet({
 }));
 
 // --------------------------
-// 2. CORS — Simple & Fast
-// --------------------------
-app.use(cors({
-  origin: ALLOWED_ORIGINS,
-  credentials: true,
-  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"]
-}));
-app.options("*", cors());
-
-// --------------------------
 // 3. Rate Limiting — ONLY apply to non-group routes
 // --------------------------
 const apiLimiter = rateLimit({
@@ -43,7 +46,6 @@ const apiLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: { success: false, error: "Too many requests — please wait" },
-  // ✅ Completely skip rate limit for groups/ads/wall
   skip: (req) =>
     req.path.startsWith("/api/groups") ||
     req.path.startsWith("/api/ads") ||
@@ -81,7 +83,7 @@ const io = new Server(server, {
     origin: ALLOWED_ORIGINS,
     credentials: true
   },
-  transports: ["websocket"], // Faster than polling
+  transports: ["websocket"],
   pingTimeout: 60000,
   pingInterval: 25000
 });
