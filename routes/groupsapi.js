@@ -6,6 +6,11 @@ const fs = require('fs');
 
 const { data, saveData } = require('../data/index.js');
 
+// === INITIALIZE DATA SAFELY ===
+if (!Array.isArray(data.groups)) data.groups = [];
+if (typeof data.nextGroupId !== 'number') data.nextGroupId = 1;
+if (!Array.isArray(data.ads)) data.ads = [];
+
 // ----------------------
 // IMAGE UPLOAD CONFIG
 // ----------------------
@@ -230,13 +235,27 @@ router.get("/search", (req, res) => {
 // GET SINGLE GROUP
 // ----------------------
 router.get("/:id", (req, res) => {
-  const groupId = Number(req.params.id);
-  if (isNaN(groupId)) return res.status(400).json({ error: "Invalid group ID" });
+  try {
+    const groupId = Number(req.params.id);
+    if (isNaN(groupId)) {
+      return res.status(400).json({ error: "Invalid group ID" });
+    }
 
-  const group = data.groups.find(g => g.id === groupId);
-  if (!group) return res.status(404).json({ error: "Group not found" });
+    const group = data.groups.find(g => g.id === groupId);
+    if (!group) {
+      return res.status(404).json({ error: "Group not found" });
+    }
 
-  res.json(group);
+    // Safety fixes
+    if (!Array.isArray(group.members)) group.members = [];
+    if (!Array.isArray(group.wallPosts)) group.wallPosts = [];
+    if (!group.shout) group.shout = null;
+
+    res.json(group);
+  } catch (err) {
+    console.error(`Error fetching group ${req.params.id}:`, err);
+    res.status(500).json({ error: "Internal server error" });
+  }
 });
 
 // ----------------------
