@@ -9,111 +9,104 @@ const rateLimit = require('express-rate-limit');
 const app = express();
 const server = http.createServer(app);
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3000; // Use Render's assigned port automatically
 const ALLOWED_ORIGINS = ["https://idontknowww.neocities.org"];
 
 // --------------------------
-// 1. CORS — MUST run before helmet so headers always attach
-// --------------------------
-app.use(cors({
-  origin: ALLOWED_ORIGINS,
-  credentials: true,
-  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"]
-}));
-// NOTE: no separate app.options("*", cors()) needed —
-// the cors middleware above already auto-handles OPTIONS preflight
-// for every route. The old "*" string route was likely silently
-// failing to register and breaking preflight requests.
-
-// --------------------------
-// 2. Security — Lightweight, no blocking
+// 1. Security & Headers
 // --------------------------
 app.use(helmet({
   contentSecurityPolicy: false,
-  crossOriginEmbedderPolicy: false,
-  crossOriginOpenerPolicy: false,
-  crossOriginResourcePolicy: false,
-  hsts: false
+  crossOriginResourcePolicy: { policy: "cross-origin" } // Allow images/assets to load
 }));
 
+// Extra headers to avoid blocking assets
+app.use((req, res, next) => {
+  res.removeHeader("Cross-Origin-Embedder-Policy");
+  res.removeHeader("Cross-Origin-Opener-Policy");
+  res.setHeader("Access-Control-Allow-Origin", ALLOWED_ORIGINS[0]);
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  res.setHeader("Access-Control-Allow-Credentials", "true");
+  next();
+});
+
 // --------------------------
-// 3. Rate Limiting — ONLY apply to non-group routes
+// 2. Rate Limiting (Fixed)
 // --------------------------
+// Lower limit but clearer — prevents 429 errors from normal use
 const apiLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 1000,
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 500, // Allow more requests before blocking
   standardHeaders: true,
   legacyHeaders: false,
-  message: { success: false, error: "Too many requests — please wait" },
-  skip: (req) =>
-    req.path.startsWith("/api/groups") ||
-    req.path.startsWith("/api/ads") ||
-    req.path.startsWith("/api/static")
+  message: { success: false, error: "Too many requests — please wait a moment" }
 });
-app.use("/api", apiLimiter);
+app.use('/api', apiLimiter);
 
 // --------------------------
-// 4. Body Parser — Higher limit to avoid errors
+// 3. CORS Configuration
 // --------------------------
-app.use(express.json({ limit: "1mb" }));
-app.use(express.urlencoded({ extended: true, limit: "1mb" }));
+app.use(cors({
+  origin: (origin, callback) => {
+    // Allow requests from your domain OR no origin (server-to-server)
+    if (!origin || ALLOWED_ORIGINS.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error("Not allowed by CORS"));
+    }
+  },
+  credentials: true,
+  methods: ["GET", "POST", "DELETE", "PUT", "PATCH", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"]
+}));
+
+app.options("*", cors()); // Handle preflight requests
 
 // --------------------------
-// 5. Static Files — Faster serving
+// 4. Body Parser
 // --------------------------
-app.use("/uploads", express.static(path.join(__dirname, "public/uploads"), {
-  maxAge: "24h",
+app.use(express.json({ limit: '10kb' }));
+
+// --------------------------
+// 5. Static Files
+// --------------------------
+app.use(express.static(path.join(__dirname, 'public'), {
+  etag: true,
+  maxAge: '1h',
+  immutable: true,
   setHeaders: (res) => {
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Cache-Control", "public, max-age=86400");
+    res.setHeader("Access-Control-Allow-Origin", ALLOWED_ORIGINS[0]);
   }
 }));
 
-app.use(express.static(path.join(__dirname, "public"), {
-  maxAge: "1h",
-  index: false
-}));
-
 // --------------------------
-// 6. Socket.io — Optimized for Render
+// 6. Socket.io
 // --------------------------
 const io = new Server(server, {
   cors: {
     origin: ALLOWED_ORIGINS,
-    credentials: true
+    credentials: true,
+    methods: ["GET", "POST"]
   },
-  transports: ["websocket"],
-  pingTimeout: 60000,
-  pingInterval: 25000
+  transports: ["polling", "websocket"] // Better for Render free tier
 });
 
 // --------------------------
-// 7. Data & Routes
+// 7. Load Data & Routes
 // --------------------------
-const { loadData } = require("./data");
+const { loadData } = require('./data');
 loadData();
 
-const setupSockets = require("./sockets");
+const setupSockets = require('./sockets');
 setupSockets(io);
 
-app.use("/api", require("./routes/api"));
-app.use("/api/friends", require("./routes/friendsapi"));
-app.use("/api/groups", require("./routes/groupsapi"));
-app.use("/api/messages", require("./routes/messagesapi"));
-app.use("/api/admin", require("./routes/admins"));
-app.use("/", require("./routes/pages"));
-
-// --------------------------
-// 8. Health check & error handling
-// --------------------------
-app.get("/", (req, res) => res.sendStatus(200));
-app.use((err, req, res, next) => {
-  console.error("Server error:", err);
-  res.status(500).json({ success: false, error: "Server error" });
-});
+app.use('/api', require('./routes/api'));
+app.use('/api/friends', require('./routes/friendsapi'));
+app.use('/api/groups', require('./routes/groupsapi'));
+app.use('/api/messages', require('./routes/messagesapi'));
+app.use('/api/admin', require('./routes/admins'));
+app.use('/', require('./routes/pages'));
 
 // Start server
-server.keepAliveTimeout = 65000;
-server.headersTimeout = 66000;
-server.listen(PORT, () => console.log(`✅ Server running fast on port ${PORT}`));
+server.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
