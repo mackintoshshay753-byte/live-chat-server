@@ -53,6 +53,7 @@ async function createProfile(username, password) {
     theme: "light",
     bio: "",
     birthday: null,
+    gender: null,
     status: "",
     role: userRole
   };
@@ -84,6 +85,7 @@ function getProfileById(id) {
     theme: profile.theme || "light",
     bio: profile.bio || "",
     birthday: profile.birthday || null,
+    gender: profile.gender || null,
     status: profile.status || "",
     role: profile.role || "user"
   };
