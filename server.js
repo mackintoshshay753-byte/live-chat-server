@@ -9,84 +9,92 @@ const rateLimit = require('express-rate-limit');
 const app = express();
 const server = http.createServer(app);
 
-const PORT = process.env.PORT || 3000;
-const ALLOWED_ORIGINS = [
-  "https://idontknowww.neocities.org",
-  "http://idontknowww.neocities.org",
-  "null", // For local testing
-  "http://localhost:8080", // if you test locally
-  "http://127.0.0.1"
-];
+const PORT = process.env.PORT || 3000; // Use Render's assigned port automatically
+const ALLOWED_ORIGINS = ["https://idontknowww.neocities.org"];
 
-// ======================
-// 1. Security
-// ======================
+// --------------------------
+// 1. Security & Headers
+// --------------------------
 app.use(helmet({
   contentSecurityPolicy: false,
-  crossOriginResourcePolicy: { policy: "cross-origin" }
+  crossOriginResourcePolicy: { policy: "cross-origin" } // Allow images/assets to load
 }));
 
-// ======================
-// 2. CORS (Clean & Strong)
-// ======================
+// Extra headers to avoid blocking assets
+app.use((req, res, next) => {
+  res.removeHeader("Cross-Origin-Embedder-Policy");
+  res.removeHeader("Cross-Origin-Opener-Policy");
+  res.setHeader("Access-Control-Allow-Origin", ALLOWED_ORIGINS[0]);
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  res.setHeader("Access-Control-Allow-Credentials", "true");
+  next();
+});
+
+// --------------------------
+// 2. Rate Limiting (Fixed)
+// --------------------------
+// Lower limit but clearer — prevents 429 errors from normal use
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 500, // Allow more requests before blocking
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, error: "Too many requests — please wait a moment" }
+});
+app.use('/api', apiLimiter);
+
+// --------------------------
+// 3. CORS Configuration
+// --------------------------
 app.use(cors({
   origin: (origin, callback) => {
+    // Allow requests from your domain OR no origin (server-to-server)
     if (!origin || ALLOWED_ORIGINS.includes(origin)) {
       callback(null, true);
     } else {
-      console.warn(`❌ Blocked origin: ${origin}`);
       callback(new Error("Not allowed by CORS"));
     }
   },
   credentials: true,
-  methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"]
+  methods: ["GET", "POST", "DELETE", "PUT", "PATCH", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"]
 }));
 
-// Handle preflight
-app.options("*", cors());
+app.options("*", cors()); // Handle preflight requests
 
-// ======================
-// 3. Rate Limiting (Relaxed for dev)
-// ======================
-const apiLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 800,                    // Increased
-  standardHeaders: true,
-  legacyHeaders: false,
-  skip: (req) => req.path === '/api/groups' && req.method === 'GET' // Less strict on group reads
-});
-
-app.use('/api', apiLimiter);
-
-// ======================
+// --------------------------
 // 4. Body Parser
-// ======================
+// --------------------------
 app.use(express.json({ limit: '10kb' }));
-app.use(express.urlencoded({ extended: true }));
 
-// ======================
+// --------------------------
 // 5. Static Files
-// ======================
+// --------------------------
 app.use(express.static(path.join(__dirname, 'public'), {
+  etag: true,
   maxAge: '1h',
-  etag: true
+  immutable: true,
+  setHeaders: (res) => {
+    res.setHeader("Access-Control-Allow-Origin", ALLOWED_ORIGINS[0]);
+  }
 }));
 
-// ======================
+// --------------------------
 // 6. Socket.io
-// ======================
+// --------------------------
 const io = new Server(server, {
   cors: {
     origin: ALLOWED_ORIGINS,
-    credentials: true
+    credentials: true,
+    methods: ["GET", "POST"]
   },
-  transports: ["websocket", "polling"]
+  transports: ["polling", "websocket"] // Better for Render free tier
 });
 
-// ======================
-// 7. Routes & Data
-// ======================
+// --------------------------
+// 7. Load Data & Routes
+// --------------------------
 const { loadData } = require('./data');
 loadData();
 
@@ -100,10 +108,5 @@ app.use('/api/messages', require('./routes/messagesapi'));
 app.use('/api/admin', require('./routes/admins'));
 app.use('/', require('./routes/pages'));
 
-// ======================
-// Start Server
-// ======================
-server.listen(PORT, () => {
-  console.log(`✅ Server running on port ${PORT}`);
-  console.log(`✅ Allowed origins:`, ALLOWED_ORIGINS);
-});
+// Start server
+server.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
