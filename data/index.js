@@ -12,9 +12,6 @@ const DEFAULT_DATA = {
   usernameToId: {},
   friendRequests: {},
   friends: {},
-  groups: [],
-  nextGroupId: 1,
-  ads: [],
   moderationLogs: [],
   deletedAccounts: {} // Added for archive
 };
