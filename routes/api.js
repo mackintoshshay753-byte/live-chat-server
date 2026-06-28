@@ -105,6 +105,7 @@ router.get("/search/users", (req, res) => {
         matches.push({
           id: info.id,
           username,
+          gender: profile.gender || "Male",
           isOnline,
           lastOnline: profile.lastOnline || null
         });

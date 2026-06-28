@@ -182,7 +182,11 @@ router.get("/list/:userId", (req, res) => {
   const friendIds = data.friends[userId];
 
   const friends = Object.entries(data.accounts)
-    .map(([username, info]) => ({ id: info.id, username }))
+    .map(([username, info]) => ({
+      id: info.id,
+      username,
+      gender: info.gender || "Other" // ✅ ADD THIS
+    }))
     .filter(u => friendIds.includes(u.id));
 
   res.json({ friends });
