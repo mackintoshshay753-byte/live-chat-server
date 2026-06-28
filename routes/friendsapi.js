@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { data, saveData } = require('../data');
+const { onlineUsers } = require('../sockets');
 
 const MAX_FRIENDS = 200;
 
@@ -188,7 +189,9 @@ router.post("/unfriend", (req, res) => {
 // Get friend list
 router.get("/list/:userId", (req, res) => {
   const userId = parseId(req.params.userId);
-  if (userId === null) return res.status(400).json({ friends: [] });
+  if (userId === null) {
+    return res.status(400).json({ friends: [] });
+  }
 
   ensureUserStores(userId);
   const friendIds = data.friends[userId];
@@ -197,9 +200,10 @@ router.get("/list/:userId", (req, res) => {
     .map(([username, info]) => ({
       id: info.id,
       username,
-      gender: info.gender || "Other" // ✅ ADD THIS
+      gender: info.gender || "Other",
+      isOnline: onlineUsers.has(username) // <-- Add this
     }))
-    .filter(u => friendIds.includes(u.id));
+    .filter(friend => friendIds.includes(friend.id));
 
   res.json({ friends });
 });
