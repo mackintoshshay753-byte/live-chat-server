@@ -79,7 +79,19 @@ router.get("/requests/:userId", (req, res) => {
   if (userId === null) return res.status(400).json({ requests: [] });
 
   ensureUserStores(userId);
-  res.json({ requests: data.friendRequests[userId] });
+
+  const requests = data.friendRequests[userId].map(req => {
+    const account = Object.entries(data.accounts).find(
+      ([, info]) => info.id === req.fromId
+    );
+
+    return {
+      ...req,
+      fromGender: account ? account[1].gender || "Other" : "Other"
+    };
+  });
+
+  res.json({ requests });
 });
 
 // Accept request
