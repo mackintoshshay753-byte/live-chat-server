@@ -7,8 +7,7 @@ const loginAttempts = new Map();
 const MAX_ATTEMPTS = 5;
 const LOCKOUT_TIME = 15 * 60 * 1000;
 
-// ✅ NEW: Store messages between users
-// Structure: { "fromId:toId": [ { id, from, to, text, timestamp, read } ] }
+// Store messages: { "id1:id2": [messages array] }
 const messages = new Map();
 
 function sanitizeUsername(username) {
@@ -56,7 +55,7 @@ function safeCb(cb, response = {}) {
   }
 }
 
-// ✅ Helper: get conversation key (same both ways)
+// Consistent conversation key
 function getConversationKey(userA, userB) {
   const [idA, idB] = [Number(userA), Number(userB)].sort((a, b) => a - b);
   return `${idA}:${idB}`;
@@ -81,8 +80,9 @@ function setupSockets(io) {
         currentUser = cleanName;
         currentUserId = Number(account.id);
 
+        // Remove old socket entries for this user
         for (const [user, id] of onlineUsers.entries()) {
-          if (id === socket.id) onlineUsers.delete(user);
+          if (id === socket.id || user === cleanName) onlineUsers.delete(user);
         }
 
         onlineUsers.set(cleanName, socket.id);
@@ -94,6 +94,7 @@ function setupSockets(io) {
         }
 
         console.log(`👤 ${cleanName} (ID: ${currentUserId}) is online | Total: ${onlineUsers.size}`);
+        console.log("📋 Online users:", Array.from(onlineUsers.entries()));
       } catch (err) {
         console.error('Join error:', err);
       }
@@ -136,7 +137,7 @@ function setupSockets(io) {
           return safeCb(cb, { message: "Account not found" });
         }
 
-        // ✅ BAN CHECK
+        // Ban check
         if (account.banned === true) {
           const now = new Date();
           const banUntil = account.banUntil ? new Date(account.banUntil) : null;
@@ -354,7 +355,7 @@ function setupSockets(io) {
       }
     });
 
-    // ✅ NEW: Send message
+    // ✅ FIXED: Send message
     socket.on("send message", ({ fromId, fromName, toId, toName, text }, cb) => {
       try {
         if (!fromId || !toId || !text.trim()) {
@@ -376,20 +377,26 @@ function setupSockets(io) {
         if (!messages.has(key)) messages.set(key, []);
         messages.get(key).push(message);
 
-        // Send to recipient if online
+        console.log(`✉️ Sending message from ${fromName} to ${toName}`);
+        console.log("📡 Online users:", Array.from(onlineUsers.entries()));
+
+        // ✅ Fixed: Send message to recipient
         const recipientSocketId = onlineUsers.get(toName);
         if (recipientSocketId) {
+          console.log(`✅ Delivering to socket: ${recipientSocketId}`);
           io.to(recipientSocketId).emit("new message", message);
+        } else {
+          console.log(`⚠️ Recipient ${toName} is offline — message saved`);
         }
 
         safeCb(cb, { success: true, message });
       } catch (err) {
-        console.error("Send message error:", err);
+        console.error("❌ Send message error:", err);
         safeCb(cb, { success: false, message: "Failed to send message" });
       }
     });
 
-    // ✅ NEW: Get message history
+    // Get message history
     socket.on("get messages", ({ userId, friendId }, cb) => {
       try {
         const key = getConversationKey(userId, friendId);
@@ -403,7 +410,7 @@ function setupSockets(io) {
 
   });
 
-  // ✅ NEW: HTTP endpoint for message history
+  // HTTP endpoint for messages
   const express = require('express');
   const router = express.Router();
   router.get('/api/messages/:userId/:friendId', (req, res) => {
@@ -412,8 +419,7 @@ function setupSockets(io) {
     res.json({ success: true, messages: messages.get(key) || [] });
   });
 
-  // Attach router to your Express app (if you have one)
-  // app.use(router);
+  return router;
 }
 
 module.exports = setupSockets;
