@@ -7,6 +7,10 @@ const loginAttempts = new Map();
 const MAX_ATTEMPTS = 5;
 const LOCKOUT_TIME = 15 * 60 * 1000;
 
+// ✅ NEW: Store messages between users
+// Structure: { "fromId:toId": [ { id, from, to, text, timestamp, read } ] }
+const messages = new Map();
+
 function sanitizeUsername(username) {
   if (typeof username !== 'string') return '';
   return clean(username.trim());
@@ -52,10 +56,17 @@ function safeCb(cb, response = {}) {
   }
 }
 
+// ✅ Helper: get conversation key (same both ways)
+function getConversationKey(userA, userB) {
+  const [idA, idB] = [Number(userA), Number(userB)].sort((a, b) => a - b);
+  return `${idA}:${idB}`;
+}
+
 function setupSockets(io) {
   io.on("connection", (socket) => {
     const clientIp = socket.handshake.address || socket.handshake.headers['x-forwarded-for'] || 'unknown';
     let currentUser = null;
+    let currentUserId = null;
 
     console.log(`🔌 User connected | IP: ${clientIp}`);
 
@@ -64,14 +75,17 @@ function setupSockets(io) {
         const cleanName = sanitizeUsername(username);
         if (!cleanName) return;
 
+        const account = data.accounts[cleanName];
+        if (!account) return;
+
+        currentUser = cleanName;
+        currentUserId = Number(account.id);
+
         for (const [user, id] of onlineUsers.entries()) {
           if (id === socket.id) onlineUsers.delete(user);
         }
 
         onlineUsers.set(cleanName, socket.id);
-        currentUser = cleanName;
-
-        const account = data.accounts[cleanName];
 
         if (data.userProfiles[cleanName]) {
           data.userProfiles[cleanName].lastOnline = new Date().toISOString();
@@ -79,7 +93,7 @@ function setupSockets(io) {
           saveData();
         }
 
-        console.log(`👤 ${cleanName} is online | Total: ${onlineUsers.size}`);
+        console.log(`👤 ${cleanName} (ID: ${currentUserId}) is online | Total: ${onlineUsers.size}`);
       } catch (err) {
         console.error('Join error:', err);
       }
@@ -104,165 +118,141 @@ function setupSockets(io) {
     });
 
     socket.on("login", async ({ username, password }, cb) => {
-  try {
-    const name = sanitizeUsername(username);
-    if (!name || typeof password !== 'string') {
-      return safeCb(cb, { success: false, message: "Invalid input" });
-    }
+      try {
+        const name = sanitizeUsername(username);
+        if (!name || typeof password !== 'string') {
+          return safeCb(cb, { success: false, message: "Invalid input" });
+        }
 
-    const rateCheck = checkRateLimit(`${name}:${clientIp}`);
-    if (!rateCheck.allowed) {
-      return safeCb(cb, { message: rateCheck.message });
-    }
+        const rateCheck = checkRateLimit(`${name}:${clientIp}`);
+        if (!rateCheck.allowed) {
+          return safeCb(cb, { message: rateCheck.message });
+        }
 
-    const lowerName = name.toLowerCase();
-    const account = data.accounts[name];
+        const lowerName = name.toLowerCase();
+        const account = data.accounts[name];
 
-    if (!account || !account.hash || !data.registeredNames[lowerName]) {
-      return safeCb(cb, { message: "Account not found" });
-    }
+        if (!account || !account.hash || !data.registeredNames[lowerName]) {
+          return safeCb(cb, { message: "Account not found" });
+        }
 
-    // ✅ BAN CHECK — NEW CODE HERE
-    if (account.banned === true) {
-      const now = new Date();
-      const banUntil = account.banUntil ? new Date(account.banUntil) : null;
-      let durationText = "Permanent";
-      let remaining = "";
+        // ✅ BAN CHECK
+        if (account.banned === true) {
+          const now = new Date();
+          const banUntil = account.banUntil ? new Date(account.banUntil) : null;
+          let durationText = "Permanent";
+          let remaining = "";
 
-      if (banUntil && banUntil > now) {
-        const diffMs = banUntil - now;
-        const days = Math.floor(diffMs / 86400000);
-        const hours = Math.floor((diffMs % 86400000) / 3600000);
-        durationText = `${days}d ${hours}h`;
-        remaining = `Expires: ${banUntil.toLocaleString()}`;
-      } else if (banUntil && banUntil <= now) {
-        // Auto-unban if time is up
-        account.banned = false;
-        account.banReason = "";
-        account.banUntil = null;
-        saveData();
+          if (banUntil && banUntil > now) {
+            const diffMs = banUntil - now;
+            const days = Math.floor(diffMs / 86400000);
+            const hours = Math.floor((diffMs % 86400000) / 3600000);
+            durationText = `${days}d ${hours}h`;
+            remaining = `Expires: ${banUntil.toLocaleString()}`;
+          } else if (banUntil && banUntil <= now) {
+            account.banned = false;
+            account.banReason = "";
+            account.banUntil = null;
+            saveData();
+          }
+
+          return safeCb(cb, {
+            success: false,
+            banned: true,
+            message: "Your account is banned",
+            duration: durationText,
+            reason: account.banReason || "No reason given",
+            expires: banUntil ? banUntil.toISOString() : null
+          });
+        }
+
+        const validPassword = await bcrypt.compare(password, account.hash);
+        if (!validPassword) {
+          return safeCb(cb, { message: "Incorrect username or password" });
+        }
+
+        loginAttempts.delete(`${name}:${clientIp}`);
+
+        safeCb(cb, {
+          success: true,
+          username: name,
+          id: account.id,
+          theme: account.theme || 'light'
+        });
+      } catch (err) {
+        console.error("Login Error:", err);
+        safeCb(cb, { message: "Server error — please try again later" });
       }
-
-      return safeCb(cb, {
-        success: false,
-        banned: true,
-        message: "Your account is banned",
-        duration: durationText,
-        reason: account.banReason || "No reason given",
-        expires: banUntil ? banUntil.toISOString() : null
-      });
-    }
-    // ✅ END BAN CHECK
-
-    const validPassword = await bcrypt.compare(password, account.hash);
-    if (!validPassword) {
-      return safeCb(cb, { message: "Incorrect username or password" });
-    }
-
-    loginAttempts.delete(`${name}:${clientIp}`);
-
-    safeCb(cb, {
-      success: true,
-      username: name,
-      id: account.id,
-      theme: account.theme || 'light'
     });
-  } catch (err) {
-    console.error("Login Error:", err);
-    safeCb(cb, { message: "Server error — please try again later" });
-  }
-});
 
     socket.on("signup", async ({ username, password, birthday, gender }, cb) => {
-  try {
-    const name = sanitizeUsername(username);
-    if (!name) return safeCb(cb, { message: "Invalid username format" });
+      try {
+        const name = sanitizeUsername(username);
+        if (!name) return safeCb(cb, { message: "Invalid username format" });
 
-    const lower = name.toLowerCase();
+        const lower = name.toLowerCase();
 
-    if (name.length < 3 || name.length > 20 || /\s/.test(name) || !/^[a-zA-Z0-9_]+$/.test(name)) {
-      return safeCb(cb, { message: "Invalid username format" });
-    }
+        if (name.length < 3 || name.length > 20 || /\s/.test(name) || !/^[a-zA-Z0-9_]+$/.test(name)) {
+          return safeCb(cb, { message: "Invalid username format" });
+        }
 
-    if (data.registeredNames[lower]) {
-      return safeCb(cb, { message: "Username already taken" });
-    }
+        if (data.registeredNames[lower]) {
+          return safeCb(cb, { message: "Username already taken" });
+        }
 
-    if (!isStrongPassword(password)) {
-      return safeCb(cb, { message: "Password must be 8+ chars with letters + numbers" });
-    }
+        if (!isStrongPassword(password)) {
+          return safeCb(cb, { message: "Password must be 8+ chars with letters + numbers" });
+        }
 
-    if (!["Male", "Female"].includes(gender)) {
-      return safeCb(cb, { message: "Gender is required" });
-    }
+        if (!["Male", "Female", "Other"].includes(gender)) {
+          return safeCb(cb, { message: "Gender is required" });
+        }
 
-    if (
-      !birthday ||
-      typeof birthday.month !== "string" ||
-      !birthday.month ||
-      !birthday.day ||
-      !birthday.year
-    ) {
-      return safeCb(cb, { message: "Birthday is required" });
-    }
+        if (!birthday || !birthday.month || !birthday.day || !birthday.year) {
+          return safeCb(cb, { message: "Birthday is required" });
+        }
 
-    const monthNames = [
-      "January","February","March","April","May","June",
-      "July","August","September","October","November","December"
-    ];
+        const monthNames = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+        if (!monthNames.includes(birthday.month)) {
+          return safeCb(cb, { message: "Invalid birthday month" });
+        }
 
-    if (!monthNames.includes(birthday.month)) {
-      return safeCb(cb, { message: "Invalid birthday month" });
-    }
+        const monthIndex = monthNames.indexOf(birthday.month);
+        const testDate = new Date(Number(birthday.year), monthIndex, Number(birthday.day));
+        if (testDate.getFullYear() !== Number(birthday.year) || testDate.getMonth() !== monthIndex || testDate.getDate() !== Number(birthday.day)) {
+          return safeCb(cb, { message: "Invalid birthday date" });
+        }
 
-    const monthIndex = monthNames.indexOf(birthday.month);
-    const testDate = new Date(Number(birthday.year), monthIndex, Number(birthday.day));
-    if (
-      testDate.getFullYear() !== Number(birthday.year) ||
-      testDate.getMonth() !== monthIndex ||
-      testDate.getDate() !== Number(birthday.day)
-    ) {
-      return safeCb(cb, { message: "Invalid birthday date" });
-    }
+        const r = await createProfile(name, password);
+        if (!r.success) {
+          return safeCb(cb, { success: false, message: r.message || "Username is not appropriate" });
+        }
 
-    const r = await createProfile(name, password);
-    if (!r.success) {
-      return safeCb(cb, { success: false, message: r.message || "Username is not appropriate" });
-    }
+        const id = r.user.id;
+        data.registeredNames[lower] = true;
 
-    const id = r.user.id;
-    data.registeredNames[lower] = true;
+        if (data.accounts[name]) {
+          data.accounts[name].joinDate = new Date().toISOString();
+          data.accounts[name].theme = "light";
+          data.accounts[name].verified = false;
+          data.accounts[name].birthday = { month: birthday.month, day: Number(birthday.day), year: Number(birthday.year) };
+          data.accounts[name].gender = gender;
+        }
 
-    if (data.accounts[name]) {
-      data.accounts[name].joinDate = new Date().toISOString();
-      data.accounts[name].theme = "light";
-      data.accounts[name].verified = false;
-      data.accounts[name].birthday = {
-        month: birthday.month,
-        day: Number(birthday.day),
-        year: Number(birthday.year)
-      };
-      data.accounts[name].gender = gender;
-    }
+        if (data.userProfiles[name]) {
+          data.userProfiles[name].birthday = { month: birthday.month, day: Number(birthday.day), year: Number(birthday.year) };
+          data.userProfiles[name].gender = gender;
+          data.userProfiles[name].isOnline = false;
+          data.userProfiles[name].lastOnline = null;
+        }
 
-    if (data.userProfiles[name]) {
-      data.userProfiles[name].birthday = {
-        month: birthday.month,
-        day: Number(birthday.day),
-        year: Number(birthday.year)
-      };
-      data.userProfiles[name].gender = gender;
-      data.userProfiles[name].isOnline = false;
-      data.userProfiles[name].lastOnline = null;
-    }
-
-    saveData();
-    safeCb(cb, { success: true, username: name, id, gender });
-  } catch (e) {
-    console.error("Signup Error:", e);
-    safeCb(cb, { message: "Server error" });
-  }
-});
+        saveData();
+        safeCb(cb, { success: true, username: name, id, gender });
+      } catch (e) {
+        console.error("Signup Error:", e);
+        safeCb(cb, { message: "Server error" });
+      }
+    });
 
     socket.on("save-theme", ({ theme, username }, cb) => {
       try {
@@ -271,12 +261,8 @@ function setupSockets(io) {
           return safeCb(cb, { message: "Invalid theme or user" });
         }
 
-        if (data.accounts[name]) {
-          data.accounts[name].theme = theme;
-        }
-        if (data.userProfiles[name]) {
-          data.userProfiles[name].theme = theme;
-        }
+        if (data.accounts[name]) data.accounts[name].theme = theme;
+        if (data.userProfiles[name]) data.userProfiles[name].theme = theme;
 
         saveData();
         safeCb(cb, { success: true });
@@ -298,14 +284,10 @@ function setupSockets(io) {
         const oldLower = cleanOld.toLowerCase();
         const newLower = cleanNew.toLowerCase();
 
-        if (cleanNew.length < 3 || cleanNew.length > 20)
-          return safeCb(cb, { message: "New name must be 3–20 characters" });
-        if (!/^[a-zA-Z0-9_]+$/.test(cleanNew))
-          return safeCb(cb, { message: "Only letters, numbers and underscores allowed" });
-        if (data.registeredNames[newLower])
-          return safeCb(cb, { message: "New username already taken" });
-        if (!data.accounts[cleanOld])
-          return safeCb(cb, { message: "Original account not found" });
+        if (cleanNew.length < 3 || cleanNew.length > 20) return safeCb(cb, { message: "New name must be 3–20 characters" });
+        if (!/^[a-zA-Z0-9_]+$/.test(cleanNew)) return safeCb(cb, { message: "Only letters, numbers and underscores allowed" });
+        if (data.registeredNames[newLower]) return safeCb(cb, { message: "New username already taken" });
+        if (!data.accounts[cleanOld]) return safeCb(cb, { message: "Original account not found" });
 
         delete data.registeredNames[oldLower];
         data.registeredNames[newLower] = true;
@@ -371,7 +353,67 @@ function setupSockets(io) {
         safeCb(cb, { message: "Failed to update password" });
       }
     });
+
+    // ✅ NEW: Send message
+    socket.on("send message", ({ fromId, fromName, toId, toName, text }, cb) => {
+      try {
+        if (!fromId || !toId || !text.trim()) {
+          return safeCb(cb, { success: false, message: "Missing required fields" });
+        }
+
+        const message = {
+          id: Date.now().toString(36) + Math.random().toString(36).slice(2),
+          fromId: Number(fromId),
+          fromName,
+          toId: Number(toId),
+          toName,
+          text: text.trim(),
+          timestamp: new Date().toISOString(),
+          read: false
+        };
+
+        const key = getConversationKey(fromId, toId);
+        if (!messages.has(key)) messages.set(key, []);
+        messages.get(key).push(message);
+
+        // Send to recipient if online
+        const recipientSocketId = onlineUsers.get(toName);
+        if (recipientSocketId) {
+          io.to(recipientSocketId).emit("new message", message);
+        }
+
+        safeCb(cb, { success: true, message });
+      } catch (err) {
+        console.error("Send message error:", err);
+        safeCb(cb, { success: false, message: "Failed to send message" });
+      }
+    });
+
+    // ✅ NEW: Get message history
+    socket.on("get messages", ({ userId, friendId }, cb) => {
+      try {
+        const key = getConversationKey(userId, friendId);
+        const history = messages.get(key) || [];
+        safeCb(cb, { success: true, messages: history });
+      } catch (err) {
+        console.error("Get messages error:", err);
+        safeCb(cb, { success: false, messages: [] });
+      }
+    });
+
   });
+
+  // ✅ NEW: HTTP endpoint for message history
+  const express = require('express');
+  const router = express.Router();
+  router.get('/api/messages/:userId/:friendId', (req, res) => {
+    const { userId, friendId } = req.params;
+    const key = getConversationKey(userId, friendId);
+    res.json({ success: true, messages: messages.get(key) || [] });
+  });
+
+  // Attach router to your Express app (if you have one)
+  // app.use(router);
 }
 
 module.exports = setupSockets;
