@@ -52,6 +52,12 @@ function safeCb(cb, response = {}) {
   }
 }
 
+function getChatId(a, b) {
+  const idA = Number(a);
+  const idB = Number(b);
+  return idA < idB ? `chat:${idA}:${idB}` : `chat:${idB}:${idA}`;
+}
+
 function setupSockets(io) {
   io.on("connection", (socket) => {
     const clientIp = socket.handshake.address || socket.handshake.headers['x-forwarded-for'] || 'unknown';
@@ -371,6 +377,50 @@ function setupSockets(io) {
         safeCb(cb, { message: "Failed to update password" });
       }
     });
+    socket.on("join-chat", ({ fromUserId, toUserId }) => {
+      try {
+        const chatId = getChatId(fromUserId, toUserId);
+        socket.join(chatId);
+        console.log(`📥 ${currentUser} joined chat ${chatId}`);
+      } catch (err) {
+        console.error("Join chat error:", err);
+      }
+    });
+    socket.on("send-message", async ({ fromUserId, fromUsername, toUserId, toUsername, text }, cb) => {
+  try {
+    if (!fromUserId || !toUserId || !text || !currentUser) {
+      return safeCb(cb, { success: false, message: "Missing fields" });
+    }
+
+    const chatId = getChatId(fromUserId, toUserId);
+    const timestamp = new Date().toISOString();
+
+    // Create message object
+    const message = {
+      id: Date.now().toString(),
+      from: Number(fromUserId),
+      fromName: fromUsername,
+      to: Number(toUserId),
+      toName: toUsername,
+      text: text.trim(),
+      timestamp,
+      read: false
+    };
+
+    // Save to data
+    if (!data.messages[chatId]) data.messages[chatId] = [];
+    data.messages[chatId].push(message);
+    await saveData();
+
+    // Send to everyone in the chat room
+    io.to(chatId).emit("new-message", message);
+
+    safeCb(cb, { success: true, message });
+  } catch (err) {
+    console.error("Send message error:", err);
+    safeCb(cb, { success: false, message: "Failed to send message" });
+  }
+});
   });
 }
 
