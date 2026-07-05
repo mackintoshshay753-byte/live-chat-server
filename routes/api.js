@@ -131,16 +131,4 @@ router.get("/search/users", (req, res) => {
   }
 });
 
-router.get("/chat/history/:userA/:userB", async (req, res) => {
-  try {
-    const { userA, userB } = req.params;
-    const chatId = getChatId(userA, userB);
-    const messages = data.messages[chatId] || [];
-    res.json({ success: true, messages });
-  } catch (err) {
-    console.error("Load history error:", err);
-    res.status(500).json({ success: false, message: "Server error" });
-  }
-});
-
 module.exports = router;

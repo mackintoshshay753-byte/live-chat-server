@@ -7,6 +7,14 @@ const loginAttempts = new Map();
 const MAX_ATTEMPTS = 5;
 const LOCKOUT_TIME = 15 * 60 * 1000;
 
+// --------------------------
+// Chat helper
+// --------------------------
+function getChatId(userIdA, userIdB) {
+  const [x, y] = [Number(userIdA), Number(userIdB)].sort((a, b) => a - b);
+  return `chat:${x}:${y}`;
+}
+
 function sanitizeUsername(username) {
   if (typeof username !== 'string') return '';
   return clean(username.trim());
@@ -52,16 +60,11 @@ function safeCb(cb, response = {}) {
   }
 }
 
-function getChatId(a, b) {
-  const idA = Number(a);
-  const idB = Number(b);
-  return idA < idB ? `chat:${idA}:${idB}` : `chat:${idB}:${idA}`;
-}
-
 function setupSockets(io) {
   io.on("connection", (socket) => {
     const clientIp = socket.handshake.address || socket.handshake.headers['x-forwarded-for'] || 'unknown';
     let currentUser = null;
+    let currentUserId = null;
 
     console.log(`🔌 User connected | IP: ${clientIp}`);
 
@@ -70,6 +73,9 @@ function setupSockets(io) {
         const cleanName = sanitizeUsername(username);
         if (!cleanName) return;
 
+        const profile = data.userProfiles[cleanName];
+        if (profile) currentUserId = profile.id;
+
         for (const [user, id] of onlineUsers.entries()) {
           if (id === socket.id) onlineUsers.delete(user);
         }
@@ -77,15 +83,14 @@ function setupSockets(io) {
         onlineUsers.set(cleanName, socket.id);
         currentUser = cleanName;
 
-        const account = data.accounts[cleanName];
-
-        if (data.userProfiles[cleanName]) {
-          data.userProfiles[cleanName].lastOnline = new Date().toISOString();
-          data.userProfiles[cleanName].isOnline = true;
+        if (profile) {
+          profile.lastOnline = new Date().toISOString();
+          profile.isOnline = true;
           saveData();
+          io.emit("user-status", { userId: currentUserId, isOnline: true });
         }
 
-        console.log(`👤 ${cleanName} is online | Total: ${onlineUsers.size}`);
+        console.log(`👤 ${cleanName} (ID: ${currentUserId}) is online | Total: ${onlineUsers.size}`);
       } catch (err) {
         console.error('Join error:', err);
       }
@@ -93,15 +98,15 @@ function setupSockets(io) {
 
     socket.on("disconnect", () => {
       try {
-        if (currentUser) {
+        if (currentUser && currentUserId) {
           onlineUsers.delete(currentUser);
-
-          if (data.userProfiles[currentUser]) {
-            data.userProfiles[currentUser].lastOnline = new Date().toISOString();
-            data.userProfiles[currentUser].isOnline = false;
+          const profile = data.userProfiles[currentUser];
+          if (profile) {
+            profile.lastOnline = new Date().toISOString();
+            profile.isOnline = false;
             saveData();
+            io.emit("user-status", { userId: currentUserId, isOnline: false });
           }
-
           console.log(`👤 ${currentUser} went offline | Total: ${onlineUsers.size}`);
         }
       } catch (err) {
@@ -110,165 +115,154 @@ function setupSockets(io) {
     });
 
     socket.on("login", async ({ username, password }, cb) => {
-  try {
-    const name = sanitizeUsername(username);
-    if (!name || typeof password !== 'string') {
-      return safeCb(cb, { success: false, message: "Invalid input" });
-    }
+      try {
+        const name = sanitizeUsername(username);
+        if (!name || typeof password !== 'string') {
+          return safeCb(cb, { success: false, message: "Invalid input" });
+        }
 
-    const rateCheck = checkRateLimit(`${name}:${clientIp}`);
-    if (!rateCheck.allowed) {
-      return safeCb(cb, { message: rateCheck.message });
-    }
+        const rateCheck = checkRateLimit(`${name}:${clientIp}`);
+        if (!rateCheck.allowed) {
+          return safeCb(cb, { message: rateCheck.message });
+        }
 
-    const lowerName = name.toLowerCase();
-    const account = data.accounts[name];
+        const lowerName = name.toLowerCase();
+        const account = data.accounts[name];
 
-    if (!account || !account.hash || !data.registeredNames[lowerName]) {
-      return safeCb(cb, { message: "Account not found" });
-    }
+        if (!account || !account.hash || !data.registeredNames[lowerName]) {
+          return safeCb(cb, { message: "Account not found" });
+        }
 
-    // ✅ BAN CHECK — NEW CODE HERE
-    if (account.banned === true) {
-      const now = new Date();
-      const banUntil = account.banUntil ? new Date(account.banUntil) : null;
-      let durationText = "Permanent";
-      let remaining = "";
+        if (account.banned === true) {
+          const now = new Date();
+          const banUntil = account.banUntil ? new Date(account.banUntil) : null;
+          let durationText = "Permanent";
 
-      if (banUntil && banUntil > now) {
-        const diffMs = banUntil - now;
-        const days = Math.floor(diffMs / 86400000);
-        const hours = Math.floor((diffMs % 86400000) / 3600000);
-        durationText = `${days}d ${hours}h`;
-        remaining = `Expires: ${banUntil.toLocaleString()}`;
-      } else if (banUntil && banUntil <= now) {
-        // Auto-unban if time is up
-        account.banned = false;
-        account.banReason = "";
-        account.banUntil = null;
-        saveData();
+          if (banUntil && banUntil > now) {
+            const diffMs = banUntil - now;
+            const days = Math.floor(diffMs / 86400000);
+            const hours = Math.floor((diffMs % 86400000) / 3600000);
+            durationText = `${days}d ${hours}h`;
+          } else if (banUntil && banUntil <= now) {
+            account.banned = false;
+            account.banReason = "";
+            account.banUntil = null;
+            saveData();
+          }
+
+          return safeCb(cb, {
+            success: false,
+            banned: true,
+            message: "Your account is banned",
+            duration: durationText,
+            reason: account.banReason || "No reason given"
+          });
+        }
+
+        const validPassword = await bcrypt.compare(password, account.hash);
+        if (!validPassword) {
+          return safeCb(cb, { message: "Incorrect username or password" });
+        }
+
+        loginAttempts.delete(`${name}:${clientIp}`);
+        currentUserId = account.id;
+
+        safeCb(cb, {
+          success: true,
+          username: name,
+          id: account.id,
+          theme: account.theme || 'light'
+        });
+      } catch (err) {
+        console.error("Login Error:", err);
+        safeCb(cb, { message: "Server error — please try again later" });
       }
-
-      return safeCb(cb, {
-        success: false,
-        banned: true,
-        message: "Your account is banned",
-        duration: durationText,
-        reason: account.banReason || "No reason given",
-        expires: banUntil ? banUntil.toISOString() : null
-      });
-    }
-    // ✅ END BAN CHECK
-
-    const validPassword = await bcrypt.compare(password, account.hash);
-    if (!validPassword) {
-      return safeCb(cb, { message: "Incorrect username or password" });
-    }
-
-    loginAttempts.delete(`${name}:${clientIp}`);
-
-    safeCb(cb, {
-      success: true,
-      username: name,
-      id: account.id,
-      theme: account.theme || 'light'
     });
-  } catch (err) {
-    console.error("Login Error:", err);
-    safeCb(cb, { message: "Server error — please try again later" });
-  }
-});
 
     socket.on("signup", async ({ username, password, birthday, gender }, cb) => {
-  try {
-    const name = sanitizeUsername(username);
-    if (!name) return safeCb(cb, { message: "Invalid username format" });
+      try {
+        const name = sanitizeUsername(username);
+        if (!name) return safeCb(cb, { message: "Invalid username format" });
 
-    const lower = name.toLowerCase();
+        const lower = name.toLowerCase();
 
-    if (name.length < 3 || name.length > 20 || /\s/.test(name) || !/^[a-zA-Z0-9_]+$/.test(name)) {
-      return safeCb(cb, { message: "Invalid username format" });
-    }
+        if (name.length < 3 || name.length > 20 || /\s/.test(name) || !/^[a-zA-Z0-9_]+$/.test(name)) {
+          return safeCb(cb, { message: "Invalid username format" });
+        }
 
-    if (data.registeredNames[lower]) {
-      return safeCb(cb, { message: "Username already taken" });
-    }
+        if (data.registeredNames[lower]) {
+          return safeCb(cb, { message: "Username already taken" });
+        }
 
-    if (!isStrongPassword(password)) {
-      return safeCb(cb, { message: "Password must be 8+ chars with letters + numbers" });
-    }
+        if (!isStrongPassword(password)) {
+          return safeCb(cb, { message: "Password must be 8+ chars with letters + numbers" });
+        }
 
-    if (!["Male", "Female"].includes(gender)) {
-      return safeCb(cb, { message: "Gender is required" });
-    }
+        if (!["Male", "Female"].includes(gender)) {
+          return safeCb(cb, { message: "Gender is required" });
+        }
 
-    if (
-      !birthday ||
-      typeof birthday.month !== "string" ||
-      !birthday.month ||
-      !birthday.day ||
-      !birthday.year
-    ) {
-      return safeCb(cb, { message: "Birthday is required" });
-    }
+        if (!birthday || typeof birthday.month !== "string" || !birthday.month || !birthday.day || !birthday.year) {
+          return safeCb(cb, { message: "Birthday is required" });
+        }
 
-    const monthNames = [
-      "January","February","March","April","May","June",
-      "July","August","September","October","November","December"
-    ];
+        const monthNames = [
+          "January","February","March","April","May","June",
+          "July","August","September","October","November","December"
+        ];
 
-    if (!monthNames.includes(birthday.month)) {
-      return safeCb(cb, { message: "Invalid birthday month" });
-    }
+        if (!monthNames.includes(birthday.month)) {
+          return safeCb(cb, { message: "Invalid birthday month" });
+        }
 
-    const monthIndex = monthNames.indexOf(birthday.month);
-    const testDate = new Date(Number(birthday.year), monthIndex, Number(birthday.day));
-    if (
-      testDate.getFullYear() !== Number(birthday.year) ||
-      testDate.getMonth() !== monthIndex ||
-      testDate.getDate() !== Number(birthday.day)
-    ) {
-      return safeCb(cb, { message: "Invalid birthday date" });
-    }
+        const monthIndex = monthNames.indexOf(birthday.month);
+        const testDate = new Date(Number(birthday.year), monthIndex, Number(birthday.day));
+        if (
+          testDate.getFullYear() !== Number(birthday.year) ||
+          testDate.getMonth() !== monthIndex ||
+          testDate.getDate() !== Number(birthday.day)
+        ) {
+          return safeCb(cb, { message: "Invalid birthday date" });
+        }
 
-    const r = await createProfile(name, password);
-    if (!r.success) {
-      return safeCb(cb, { success: false, message: r.message || "Username is not appropriate" });
-    }
+        const r = await createProfile(name, password);
+        if (!r.success) {
+          return safeCb(cb, { success: false, message: r.message || "Username is not appropriate" });
+        }
 
-    const id = r.user.id;
-    data.registeredNames[lower] = true;
+        const id = r.user.id;
+        data.registeredNames[lower] = true;
 
-    if (data.accounts[name]) {
-      data.accounts[name].joinDate = new Date().toISOString();
-      data.accounts[name].theme = "light";
-      data.accounts[name].verified = false;
-      data.accounts[name].birthday = {
-        month: birthday.month,
-        day: Number(birthday.day),
-        year: Number(birthday.year)
-      };
-      data.accounts[name].gender = gender;
-    }
+        if (data.accounts[name]) {
+          data.accounts[name].joinDate = new Date().toISOString();
+          data.accounts[name].theme = "light";
+          data.accounts[name].verified = false;
+          data.accounts[name].birthday = {
+            month: birthday.month,
+            day: Number(birthday.day),
+            year: Number(birthday.year)
+          };
+          data.accounts[name].gender = gender;
+        }
 
-    if (data.userProfiles[name]) {
-      data.userProfiles[name].birthday = {
-        month: birthday.month,
-        day: Number(birthday.day),
-        year: Number(birthday.year)
-      };
-      data.userProfiles[name].gender = gender;
-      data.userProfiles[name].isOnline = false;
-      data.userProfiles[name].lastOnline = null;
-    }
+        if (data.userProfiles[name]) {
+          data.userProfiles[name].birthday = {
+            month: birthday.month,
+            day: Number(birthday.day),
+            year: Number(birthday.year)
+          };
+          data.userProfiles[name].gender = gender;
+          data.userProfiles[name].isOnline = false;
+          data.userProfiles[name].lastOnline = null;
+        }
 
-    saveData();
-    safeCb(cb, { success: true, username: name, id, gender });
-  } catch (e) {
-    console.error("Signup Error:", e);
-    safeCb(cb, { message: "Server error" });
-  }
-});
+        saveData();
+        safeCb(cb, { success: true, username: name, id, gender });
+      } catch (e) {
+        console.error("Signup Error:", e);
+        safeCb(cb, { message: "Server error" });
+      }
+    });
 
     socket.on("save-theme", ({ theme, username }, cb) => {
       try {
@@ -277,12 +271,8 @@ function setupSockets(io) {
           return safeCb(cb, { message: "Invalid theme or user" });
         }
 
-        if (data.accounts[name]) {
-          data.accounts[name].theme = theme;
-        }
-        if (data.userProfiles[name]) {
-          data.userProfiles[name].theme = theme;
-        }
+        if (data.accounts[name]) data.accounts[name].theme = theme;
+        if (data.userProfiles[name]) data.userProfiles[name].theme = theme;
 
         saveData();
         safeCb(cb, { success: true });
@@ -377,50 +367,44 @@ function setupSockets(io) {
         safeCb(cb, { message: "Failed to update password" });
       }
     });
-    socket.on("join-chat", ({ fromUserId, toUserId }) => {
-      try {
-        const chatId = getChatId(fromUserId, toUserId);
-        socket.join(chatId);
-        console.log(`📥 ${currentUser} joined chat ${chatId}`);
-      } catch (err) {
-        console.error("Join chat error:", err);
+
+    // --------------------------
+    // ✅ CHAT FUNCTIONS
+    // --------------------------
+    socket.on("load-messages", async ({ friendId }) => {
+      if (!currentUserId || !friendId) return;
+      const convId = getChatId(currentUserId, friendId);
+      const history = data.messages[convId] || [];
+      socket.emit("chat-history", { messages: history });
+    });
+
+    socket.on("send-message", async ({ toId, text }) => {
+      if (!currentUserId || !toId || !text.trim()) return;
+
+      const convId = getChatId(currentUserId, toId);
+      const message = {
+        from: currentUserId,
+        to: Number(toId),
+        text: text.trim(),
+        timestamp: new Date().toISOString(),
+        read: false
+      };
+
+      if (!data.messages[convId]) data.messages[convId] = [];
+      data.messages[convId].push(message);
+      await saveData();
+
+      // Send to sender
+      socket.emit("new-message", message);
+
+      // Send to receiver if online
+      const receiverProfile = Object.values(data.userProfiles).find(p => p.id === Number(toId));
+      if (receiverProfile && onlineUsers.has(receiverProfile.username)) {
+        const receiverSocketId = onlineUsers.get(receiverProfile.username);
+        io.to(receiverSocketId).emit("new-message", message);
       }
     });
-    socket.on("send-message", async ({ fromUserId, fromUsername, toUserId, toUsername, text }, cb) => {
-  try {
-    if (!fromUserId || !toUserId || !text || !currentUser) {
-      return safeCb(cb, { success: false, message: "Missing fields" });
-    }
 
-    const chatId = getChatId(fromUserId, toUserId);
-    const timestamp = new Date().toISOString();
-
-    // Create message object
-    const message = {
-      id: Date.now().toString(),
-      from: Number(fromUserId),
-      fromName: fromUsername,
-      to: Number(toUserId),
-      toName: toUsername,
-      text: text.trim(),
-      timestamp,
-      read: false
-    };
-
-    // Save to data
-    if (!data.messages[chatId]) data.messages[chatId] = [];
-    data.messages[chatId].push(message);
-    await saveData();
-
-    // Send to everyone in the chat room
-    io.to(chatId).emit("new-message", message);
-
-    safeCb(cb, { success: true, message });
-  } catch (err) {
-    console.error("Send message error:", err);
-    safeCb(cb, { success: false, message: "Failed to send message" });
-  }
-});
   });
 }
 
