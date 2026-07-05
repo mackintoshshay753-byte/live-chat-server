@@ -405,6 +405,31 @@ function setupSockets(io) {
       }
     });
 
+    socket.on("typing", ({ toId }) => {
+      if (!currentUserId || !toId) return;
+
+      // Find the receiver's username
+      const receiver = Object.values(data.userProfiles).find(p => p.id === Number(toId));
+      if (receiver && onlineUsers.has(receiver.username)) {
+        const receiverSocketId = onlineUsers.get(receiver.username);
+        // Send notification to the receiver
+      io.to(receiverSocketId).emit("user-typing", {
+      fromId: currentUserId
+    });
+  }
+});
+
+socket.on("stop-typing", ({ toId }) => {
+  if (!currentUserId || !toId) return;
+
+  const receiver = Object.values(data.userProfiles).find(p => p.id === Number(toId));
+  if (receiver && onlineUsers.has(receiver.username)) {
+    const receiverSocketId = onlineUsers.get(receiver.username);
+    io.to(receiverSocketId).emit("user-stopped-typing", {
+      fromId: currentUserId
+    });
+  }
+});
   });
 }
 
