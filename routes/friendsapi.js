@@ -86,9 +86,13 @@ router.get("/requests/:userId", (req, res) => {
       ([, info]) => info.id === req.fromId
     );
 
+    const fromUsername = account ? account[0] : null;
+    const isOnline = fromUsername ? onlineUsers.has(fromUsername) : false;
+
     return {
       ...req,
-      fromGender: account ? account[1].gender || "Other" : "Other"
+      fromGender: account ? account[1].gender || "Other" : "Other",
+      isOnline
     };
   });
 
