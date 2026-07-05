@@ -81,6 +81,59 @@ router.post("/profile/update-status", async (req, res) => {
   }
 });
 
+router.get("/feed", (req, res) => {
+  try {
+    // Initialize posts array if it doesn't exist
+    if (!data.feedPosts) data.feedPosts = [];
+
+    // Return newest first
+    const sorted = [...data.feedPosts].sort(
+      (a, b) => new Date(b.createdAt) - new Date(a.createdAt)
+    );
+
+    res.json(sorted);
+  } catch (err) {
+    console.error("Get Feed Error:", err);
+    res.status(500).json({ error: "Could not load feed" });
+  }
+});
+
+router.post("/feed/post", (req, res) => {
+  try {
+    const { authorId, username, content } = req.body;
+
+    if (!authorId || !username || !content.trim()) {
+      return res.status(400).json({ error: "Missing required fields" });
+    }
+
+    // Get user's gender for avatar
+    const profile = getProfileById(authorId) || {};
+
+    const newPost = {
+      id: Date.now().toString(),
+      authorId: Number(authorId),
+      username,
+      content: content.trim().slice(0, 254),
+      gender: profile.gender || "Male",
+      createdAt: new Date().toISOString()
+    };
+
+    // Save to data store
+    if (!data.feedPosts) data.feedPosts = [];
+    data.feedPosts.push(newPost);
+    saveData();
+
+    // Emit to all connected users in real‑time
+    const io = req.app.get("io");
+    if (io) io.emit("new-post", newPost);
+
+    res.status(201).json(newPost);
+  } catch (err) {
+    console.error("Create Post Error:", err);
+    res.status(500).json({ error: "Could not create post" });
+  }
+});
+
 // ----------------------
 // SEARCH USERS
 // ----------------------
