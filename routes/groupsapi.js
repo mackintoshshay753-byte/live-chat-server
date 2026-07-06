@@ -1,9 +1,10 @@
 const express = require('express');
 const router = express.Router();
+const path = require('path'); // Critical for correct path
 
-// Import correctly matching your file
-const dataModule = require('../chat-data');
-const getData = () => dataModule.data; // Getter for current data
+// Correct import — works on Windows, Linux, Render
+const dataModule = require(path.join(__dirname, '..', 'chat-data'));
+const getData = () => dataModule.data;
 const { saveData } = dataModule;
 
 function getValidGroupId(rawId) {
@@ -14,15 +15,11 @@ function getValidGroupId(rawId) {
 router.post('/create', async (req, res) => {
   try {
     const { ownerId, ownerUsername, name, description = "", emblem = null } = req.body;
-
-    // Validate input
     if (!ownerId || !ownerUsername || !name || typeof name !== "string" || name.trim().length < 1) {
       return res.status(400).json({ success: false, error: "Missing or invalid required fields: ownerId, ownerUsername, name" });
     }
 
     const data = getData();
-
-    // Initialize groups structure if it doesn't exist yet
     if (!data.groups) data.groups = {};
     if (!data.nextGroupId || typeof data.nextGroupId !== "number") data.nextGroupId = 1;
 
@@ -33,9 +30,9 @@ router.post('/create', async (req, res) => {
       id: groupId,
       name: name.trim(),
       description: description.trim(),
-      emblem: emblem,
+      emblem,
       ownerId: Number(ownerId),
-      ownerUsername: ownerUsername,
+      ownerUsername,
       createdAt: now,
       updatedAt: now,
       members: [Number(ownerId)],
@@ -43,10 +40,8 @@ router.post('/create', async (req, res) => {
       settings: { isPrivate: false, allowRequests: true }
     };
 
-    // Save to data
     data.groups[groupId] = newGroup;
     data.nextGroupId += 1;
-
     await saveData();
 
     res.status(201).json({
@@ -66,26 +61,21 @@ router.get('/:id', (req, res) => {
   try {
     const groupId = getValidGroupId(req.params.id);
     if (!groupId) return res.status(400).json({ success: false, error: "Invalid group ID" });
-
-    const data = getData();
-    const group = data.groups?.[groupId];
-
+    const group = getData().groups?.[groupId];
     if (!group) return res.status(404).json({ success: false, error: "Group not found" });
-
     res.json({ success: true, group });
   } catch (err) {
-    console.error("❌ Error fetching group:", err);
+    console.error("❌ Get group error:", err);
     res.status(500).json({ success: false, error: "Failed to load group" });
   }
 });
 
 router.get('/', (req, res) => {
   try {
-    const data = getData();
-    const groups = Object.values(data.groups || {});
+    const groups = Object.values(getData().groups || {});
     res.json({ success: true, count: groups.length, groups });
   } catch (err) {
-    console.error("❌ Error listing groups:", err);
+    console.error("❌ List groups error:", err);
     res.status(500).json({ success: false, error: "Failed to list groups" });
   }
 });
@@ -94,30 +84,19 @@ router.post('/:id/join', async (req, res) => {
   try {
     const groupId = getValidGroupId(req.params.id);
     const { userId, username } = req.body;
-
-    if (!groupId || !userId || !username) {
-      return res.status(400).json({ success: false, error: "Missing group or user details" });
-    }
-
-    const data = getData();
-    const group = data.groups?.[groupId];
+    if (!groupId || !userId || !username) return res.status(400).json({ success: false, error: "Missing details" });
+    const group = getData().groups?.[groupId];
     if (!group) return res.status(404).json({ success: false, error: "Group not found" });
-
-    const userIdNum = Number(userId);
-    if (group.members.includes(userIdNum)) {
-      return res.json({ success: true, message: "Already a member", group });
-    }
-
-    group.members.push(userIdNum);
+    const uid = Number(userId);
+    if (group.members.includes(uid)) return res.json({ success: true, message: "Already member", group });
+    group.members.push(uid);
     group.memberCount = group.members.length;
     group.updatedAt = new Date().toISOString();
-
     await saveData();
-    res.json({ success: true, message: "Joined group successfully", group });
-
+    res.json({ success: true, message: "Joined group", group });
   } catch (err) {
-    console.error("❌ Error joining group:", err);
-    res.status(500).json({ success: false, error: "Failed to join group" });
+    console.error("❌ Join error:", err);
+    res.status(500).json({ success: false, error: "Failed to join" });
   }
 });
 
@@ -125,34 +104,20 @@ router.post('/:id/leave', async (req, res) => {
   try {
     const groupId = getValidGroupId(req.params.id);
     const { userId } = req.body;
-
-    if (!groupId || !userId) {
-      return res.status(400).json({ success: false, error: "Missing group or user ID" });
-    }
-
-    const data = getData();
-    const group = data.groups?.[groupId];
+    if (!groupId || !userId) return res.status(400).json({ success: false, error: "Missing details" });
+    const group = getData().groups?.[groupId];
     if (!group) return res.status(404).json({ success: false, error: "Group not found" });
-
-    const userIdNum = Number(userId);
-    if (!group.members.includes(userIdNum)) {
-      return res.status(400).json({ success: false, error: "Not a member of this group" });
-    }
-
-    if (group.ownerId === userIdNum) {
-      return res.status(403).json({ success: false, error: "Group owner cannot leave — transfer ownership first" });
-    }
-
-    group.members = group.members.filter(id => id !== userIdNum);
+    const uid = Number(userId);
+    if (!group.members.includes(uid)) return res.status(400).json({ success: false, error: "Not a member" });
+    if (group.ownerId === uid) return res.status(403).json({ success: false, error: "Owner can't leave" });
+    group.members = group.members.filter(id => id !== uid);
     group.memberCount = group.members.length;
     group.updatedAt = new Date().toISOString();
-
     await saveData();
-    res.json({ success: true, message: "Left group successfully", group });
-
+    res.json({ success: true, message: "Left group", group });
   } catch (err) {
-    console.error("❌ Error leaving group:", err);
-    res.status(500).json({ success: false, error: "Failed to leave group" });
+    console.error("❌ Leave error:", err);
+    res.status(500).json({ success: false, error: "Failed to leave" });
   }
 });
 
