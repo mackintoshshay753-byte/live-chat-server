@@ -373,52 +373,55 @@ function setupSockets(io) {
     // --------------------------
 
     // Load past messages + ensure gender is present
-    socket.on("load-messages", async ({ friendId }) => {
-      if (!currentUserId || !friendId) return;
-      const convId = getChatId(currentUserId, friendId);
-      const history = data.messages[convId] || [];
+socket.on("load-messages", async ({ friendId }) => {
+  if (!currentUserId || !friendId) return;
+  const convId = getChatId(currentUserId, friendId);
+  const history = data.messages[convId] || [];
 
-      const messagesWithGender = history.map(msg => {
-        if (!msg.gender) {
-          const sender = Object.values(data.userProfiles).find(p => p.id === msg.from);
-          msg.gender = sender?.gender || null;
-        }
-        return msg;
-      });
+  // Enrich messages with sender gender if missing
+  const messagesWithGender = history.map(msg => {
+    if (!msg.gender && msg.from) {
+      const sender = Object.values(data.userProfiles).find(p => p.id === msg.from);
+      msg.gender = sender?.gender || null;
+    }
+    return msg;
+  });
 
-      socket.emit("chat-history", { messages: messagesWithGender });
-    });
+  socket.emit("chat-history", { messages: messagesWithGender });
+});
 
     // Send new message + emit to both users
-    socket.on("send-message", async ({ toId, text }) => {
-      if (!currentUserId || !toId || !text.trim()) return;
+socket.on("send-message", async ({ toId, text }) => {
+  if (!currentUserId || !toId || !text.trim()) return;
 
-      const convId = getChatId(currentUserId, toId);
-      const senderProfile = Object.values(data.userProfiles).find(p => p.id === currentUserId);
+  const convId = getChatId(currentUserId, toId);
+  const senderProfile = data.userProfiles[Object.keys(data.userProfiles).find(k => data.userProfiles[k].id === currentUserId)];
 
-      const message = {
-        from: currentUserId,
-        to: Number(toId),
-        text: text.trim(),
-        timestamp: new Date().toISOString(),
-        read: false,
-        gender: senderProfile?.gender || null
-      };
+  const message = {
+    from: currentUserId,
+    to: Number(toId),
+    text: text.trim(),
+    timestamp: new Date().toISOString(),
+    read: false,
+    gender: senderProfile?.gender || null
+  };
 
-      if (!data.messages[convId]) data.messages[convId] = [];
-      data.messages[convId].push(message);
-      await saveData();
+  if (!data.messages[convId]) data.messages[convId] = [];
+  data.messages[convId].push(message);
+  await saveData();
 
-      // Send back to sender
-      socket.emit("new-message", message);
+  // Send to sender (current socket)
+  socket.emit("new-message", message);
 
-      // Send to receiver if online
-      const receiverProfile = Object.values(data.userProfiles).find(p => p.id === Number(toId));
-      if (receiverProfile && onlineUsers.has(receiverProfile.username)) {
-        const receiverSocketId = onlineUsers.get(receiverProfile.username);
-        io.to(receiverSocketId).emit("new-message", message);
-      }
-    });
+  // Find and send to receiver
+  const receiverProfile = Object.values(data.userProfiles).find(p => p.id === Number(toId));
+  if (receiverProfile) {
+    const receiverSocketId = onlineUsers.get(receiverProfile.username);
+    if (receiverSocketId) {
+      io.to(receiverSocketId).emit("new-message", message);
+    }
+  }
+});
 
     // ✅ Added typing indicators — matches your frontend
     socket.on("typing", ({ toId }) => {
