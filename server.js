@@ -75,7 +75,7 @@ app.options(/.*/, cors(corsOptions));
 
 // ---------------- Body Parser ----------------
 app.use(express.json({
-    limit: "10kb"
+    limit: "5mb"
 }));
 
 // ---------------- Static ----------------
