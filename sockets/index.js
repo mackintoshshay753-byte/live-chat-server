@@ -1,24 +1,27 @@
-const bcrypt = require("bcrypt");
-const { data, saveData } = require("../data");
-const { clean, createProfile } = require("../helpers");
+const bcrypt = require('bcrypt');
+const { data, saveData } = require('../data');
+const { clean, createProfile } = require('../helpers');
 
+const onlineUsers = new Map();
 const loginAttempts = new Map();
 const MAX_ATTEMPTS = 5;
 const LOCKOUT_TIME = 15 * 60 * 1000;
-const ACTUAL_OWNER_USERNAME = "sadieandshay87";
 
+// --------------------------
+// Chat helper
+// --------------------------
 function getChatId(userIdA, userIdB) {
   const [x, y] = [Number(userIdA), Number(userIdB)].sort((a, b) => a - b);
   return `chat:${x}:${y}`;
 }
 
 function sanitizeUsername(username) {
-  if (typeof username !== "string") return "";
+  if (typeof username !== 'string') return '';
   return clean(username.trim());
 }
 
 function isStrongPassword(password) {
-  return typeof password === "string" &&
+  return typeof password === 'string' &&
     password.length >= 8 &&
     /[a-zA-Z]/.test(password) &&
     /[0-9]/.test(password);
@@ -47,22 +50,23 @@ function checkRateLimit(identifier) {
 }
 
 function safeCb(cb, response = {}) {
-  if (typeof cb === "function") {
+  if (typeof cb === 'function') {
+    const res = { success: false, ...response };
     try {
-      cb({ success: false, ...response });
+      cb(res);
     } catch (err) {
-      console.error("Callback error:", err);
+      console.error('Callback error:', err);
     }
   }
 }
 
 function setupSockets(io) {
   io.on("connection", (socket) => {
-    const clientIp = socket.handshake.address || socket.handshake.headers["x-forwarded-for"] || "unknown";
+    const clientIp = socket.handshake.address || socket.handshake.headers['x-forwarded-for'] || 'unknown';
     let currentUser = null;
     let currentUserId = null;
 
-    console.log(`🔌 User connected | IP: ${clientIp} | Socket: ${socket.id}`);
+    console.log(`🔌 User connected | IP: ${clientIp}`);
 
     socket.on("join", (username) => {
       try {
@@ -70,51 +74,57 @@ function setupSockets(io) {
         if (!cleanName) return;
 
         const profile = data.userProfiles[cleanName];
-        if (!profile) return;
+        if (profile) currentUserId = profile.id;
 
-        currentUserId = Number(profile.id);
+        for (const [user, id] of onlineUsers.entries()) {
+          if (id === socket.id) onlineUsers.delete(user);
+        }
+
+        onlineUsers.set(cleanName, socket.id);
         currentUser = cleanName;
 
-        socket.join(`user:${currentUserId}`);
+        if (profile) {
+          profile.lastOnline = new Date().toISOString();
+          profile.isOnline = true;
+          saveData();
+          io.emit("user-status", { userId: currentUserId, isOnline: true });
+        }
 
-        profile.isOnline = true;
-        profile.lastOnline = null;
-
-        saveData();
-        io.emit("user-status", { userId: currentUserId, isOnline: true });
-
-        console.log(`👤 ${cleanName} (ID: ${currentUserId}) joined user:${currentUserId}`);
+        console.log(`👤 ${cleanName} (ID: ${currentUserId}) is online | Total: ${onlineUsers.size}`);
       } catch (err) {
-        console.error("Join error:", err);
+        console.error('Join error:', err);
       }
     });
 
     socket.on("disconnect", () => {
       try {
         if (currentUser && currentUserId) {
+          onlineUsers.delete(currentUser);
           const profile = data.userProfiles[currentUser];
           if (profile) {
-            profile.isOnline = false;
             profile.lastOnline = new Date().toISOString();
+            profile.isOnline = false;
             saveData();
             io.emit("user-status", { userId: currentUserId, isOnline: false });
           }
-          console.log(`👤 ${currentUser} went offline | Total socket: ${socket.id}`);
+          console.log(`👤 ${currentUser} went offline | Total: ${onlineUsers.size}`);
         }
       } catch (err) {
-        console.error("Disconnect error:", err);
+        console.error('Disconnect error:', err);
       }
     });
 
     socket.on("login", async ({ username, password }, cb) => {
       try {
         const name = sanitizeUsername(username);
-        if (!name || typeof password !== "string") {
-          return safeCb(cb, { message: "Invalid input" });
+        if (!name || typeof password !== 'string') {
+          return safeCb(cb, { success: false, message: "Invalid input" });
         }
 
         const rateCheck = checkRateLimit(`${name}:${clientIp}`);
-        if (!rateCheck.allowed) return safeCb(cb, { message: rateCheck.message });
+        if (!rateCheck.allowed) {
+          return safeCb(cb, { message: rateCheck.message });
+        }
 
         const lowerName = name.toLowerCase();
         const account = data.accounts[name];
@@ -155,13 +165,13 @@ function setupSockets(io) {
         }
 
         loginAttempts.delete(`${name}:${clientIp}`);
-        currentUserId = Number(account.id);
+        currentUserId = account.id;
 
         safeCb(cb, {
           success: true,
           username: name,
           id: account.id,
-          theme: account.theme || "light"
+          theme: account.theme || 'light'
         });
       } catch (err) {
         console.error("Login Error:", err);
@@ -197,8 +207,8 @@ function setupSockets(io) {
         }
 
         const monthNames = [
-          "January", "February", "March", "April", "May", "June",
-          "July", "August", "September", "October", "November", "December"
+          "January","February","March","April","May","June",
+          "July","August","September","October","November","December"
         ];
 
         if (!monthNames.includes(birthday.month)) {
@@ -257,7 +267,7 @@ function setupSockets(io) {
     socket.on("save-theme", ({ theme, username }, cb) => {
       try {
         const name = sanitizeUsername(username);
-        if (!name || !["light", "dark", "classic"].includes(theme)) {
+        if (!name || !['light', 'dark', 'classic'].includes(theme)) {
           return safeCb(cb, { message: "Invalid theme or user" });
         }
 
@@ -284,10 +294,14 @@ function setupSockets(io) {
         const oldLower = cleanOld.toLowerCase();
         const newLower = cleanNew.toLowerCase();
 
-        if (cleanNew.length < 3 || cleanNew.length > 20) return safeCb(cb, { message: "New name must be 3–20 characters" });
-        if (!/^[a-zA-Z0-9_]+$/.test(cleanNew)) return safeCb(cb, { message: "Only letters, numbers and underscores allowed" });
-        if (data.registeredNames[newLower]) return safeCb(cb, { message: "New username already taken" });
-        if (!data.accounts[cleanOld]) return safeCb(cb, { message: "Original account not found" });
+        if (cleanNew.length < 3 || cleanNew.length > 20)
+          return safeCb(cb, { message: "New name must be 3–20 characters" });
+        if (!/^[a-zA-Z0-9_]+$/.test(cleanNew))
+          return safeCb(cb, { message: "Only letters, numbers and underscores allowed" });
+        if (data.registeredNames[newLower])
+          return safeCb(cb, { message: "New username already taken" });
+        if (!data.accounts[cleanOld])
+          return safeCb(cb, { message: "Original account not found" });
 
         delete data.registeredNames[oldLower];
         data.registeredNames[newLower] = true;
@@ -308,6 +322,11 @@ function setupSockets(io) {
           delete data.usernameToId[cleanOld];
         }
 
+        if (onlineUsers.has(cleanOld)) {
+          onlineUsers.set(cleanNew, onlineUsers.get(cleanOld));
+          onlineUsers.delete(cleanOld);
+        }
+
         saveData();
         io.emit("username updated", { oldName: cleanOld, newName: cleanNew });
 
@@ -321,19 +340,20 @@ function setupSockets(io) {
     socket.on("change password", async ({ username, newPassword, currentPassword }, cb) => {
       try {
         const name = sanitizeUsername(username);
-        if (!name || typeof newPassword !== "string") return safeCb(cb, { message: "Invalid input" });
+        if (!name || typeof newPassword !== 'string') {
+          return safeCb(cb, { message: "Invalid input" });
+        }
 
         const account = data.accounts[name];
         if (!account || !account.hash) return safeCb(cb, { message: "Account not found" });
 
-        if (typeof currentPassword !== "string" || !(await bcrypt.compare(currentPassword, account.hash))) {
+        if (typeof currentPassword !== 'string' || !(await bcrypt.compare(currentPassword, account.hash))) {
           return safeCb(cb, { message: "Current password is incorrect" });
         }
 
         if (!isStrongPassword(newPassword)) {
           return safeCb(cb, { message: "New password must be at least 8 characters with letters and numbers" });
         }
-
         if (await bcrypt.compare(newPassword, account.hash)) {
           return safeCb(cb, { message: "New password cannot be the same as old password" });
         }
@@ -348,56 +368,79 @@ function setupSockets(io) {
       }
     });
 
-    socket.on("load-messages", async ({ friendId }) => {
-      if (!currentUserId || !friendId) return;
-      const convId = getChatId(currentUserId, friendId);
-      const history = data.messages[convId] || [];
+    // --------------------------
+    // ✅ UPDATED CHAT FUNCTIONS — matches your frontend exactly
+    // --------------------------
 
-      const messagesWithGender = history.map(msg => {
-        if (!msg.gender && msg.from) {
-          const sender = Object.values(data.userProfiles).find(p => Number(p.id) === Number(msg.from));
-          msg.gender = sender?.gender || null;
-        }
-        return msg;
-      });
+    // Load past messages + ensure gender is present
+socket.on("load-messages", async ({ friendId }) => {
+  if (!currentUserId || !friendId) return;
+  const convId = getChatId(currentUserId, friendId);
+  const history = data.messages[convId] || [];
 
-      socket.emit("chat-history", { messages: messagesWithGender });
-    });
+  // Enrich messages with sender gender if missing
+  const messagesWithGender = history.map(msg => {
+    if (!msg.gender && msg.from) {
+      const sender = Object.values(data.userProfiles).find(p => p.id === msg.from);
+      msg.gender = sender?.gender || null;
+    }
+    return msg;
+  });
 
-    socket.on("send-message", async ({ toId, text }) => {
-      if (!currentUserId || !toId || !text?.trim()) return;
+  socket.emit("chat-history", { messages: messagesWithGender });
+});
 
-      const toUserId = Number(toId);
-      const convId = getChatId(currentUserId, toUserId);
-      const senderProfile = Object.values(data.userProfiles).find(p => Number(p.id) === Number(currentUserId));
+    // Send new message + emit to both users
+socket.on("send-message", async ({ toId, text }) => {
+  if (!currentUserId || !toId || !text.trim()) return;
 
-      const message = {
-        from: Number(currentUserId),
-        to: toUserId,
-        text: text.trim(),
-        timestamp: new Date().toISOString(),
-        read: false,
-        gender: senderProfile?.gender || null
-      };
+  const convId = getChatId(currentUserId, toId);
+  const senderProfile = data.userProfiles[Object.keys(data.userProfiles).find(k => data.userProfiles[k].id === currentUserId)];
 
-      if (!data.messages[convId]) data.messages[convId] = [];
-      data.messages[convId].push(message);
-      await saveData();
+  const message = {
+    from: currentUserId,
+    to: Number(toId),
+    text: text.trim(),
+    timestamp: new Date().toISOString(),
+    read: false,
+    gender: senderProfile?.gender || null
+  };
 
-      socket.emit("new-message", message);
-      io.to(`user:${toUserId}`).emit("new-message", message);
-    });
+  if (!data.messages[convId]) data.messages[convId] = [];
+  data.messages[convId].push(message);
+  await saveData();
 
+  // Send to sender (current socket)
+  socket.emit("new-message", message);
+
+  // Find and send to receiver
+  const receiverProfile = Object.values(data.userProfiles).find(p => p.id === Number(toId));
+  if (receiverProfile) {
+    const receiverSocketId = onlineUsers.get(receiverProfile.username);
+    if (receiverSocketId) {
+      io.to(receiverSocketId).emit("new-message", message);
+    }
+  }
+});
+
+    // ✅ Added typing indicators — matches your frontend
     socket.on("typing", ({ toId }) => {
       if (!currentUserId || !toId) return;
-      io.to(`user:${Number(toId)}`).emit("user-typing", { fromId: currentUserId });
+      const receiver = Object.values(data.userProfiles).find(p => p.id === Number(toId));
+      if (receiver && onlineUsers.has(receiver.username)) {
+        io.to(onlineUsers.get(receiver.username)).emit("user-typing", { fromId: currentUserId });
+      }
     });
 
     socket.on("stop-typing", ({ toId }) => {
       if (!currentUserId || !toId) return;
-      io.to(`user:${Number(toId)}`).emit("user-stopped-typing", { fromId: currentUserId });
+      const receiver = Object.values(data.userProfiles).find(p => p.id === Number(toId));
+      if (receiver && onlineUsers.has(receiver.username)) {
+        io.to(onlineUsers.get(receiver.username)).emit("user-stopped-typing", { fromId: currentUserId });
+      }
     });
   });
 }
 
 module.exports = setupSockets;
+module.exports.onlineUsers = onlineUsers;
