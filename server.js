@@ -110,7 +110,6 @@ app.use("/api/friends", require("./routes/friendsapi"));
 app.use("/api/messages", require("./routes/messagesapi"));
 app.use("/api/admin", require("./routes/admins"));
 app.use("/api/chat", require("./routes/chat"));
-app.use("/api/groups", require("./routes/groupsapi"));
 app.use("/", require("./routes/pages"));
 
 // ---------------- 404 ----------------
