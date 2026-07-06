@@ -75,7 +75,7 @@ app.options(/.*/, cors(corsOptions));
 
 // ---------------- Body Parser ----------------
 app.use(express.json({
-    limit: "5mb"
+    limit: "5mb" // Increased to accept base64 images
 }));
 
 // ---------------- Static ----------------
@@ -98,7 +98,8 @@ const io = new Server(server, {
 });
 
 // ---------------- Load Data ----------------
-const { loadData } = require("./data");
+// ✅ FIXED: points to your actual file
+const { loadData } = require("./chat-data");
 loadData();
 
 // ---------------- Sockets ----------------

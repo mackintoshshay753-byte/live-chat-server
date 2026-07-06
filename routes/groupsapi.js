@@ -1,9 +1,9 @@
 const express = require('express');
 const router = express.Router();
-const path = require('path'); // Critical for correct path
+const path = require('path');
 
-// Correct import — works on Windows, Linux, Render
-const dataModule = require(path.join(__dirname, '..', 'chat-data'));
+// Load correctly
+const dataModule = require(path.resolve(__dirname, '../chat-data.js'));
 const getData = () => dataModule.data;
 const { saveData } = dataModule;
 
@@ -16,7 +16,7 @@ router.post('/create', async (req, res) => {
   try {
     const { ownerId, ownerUsername, name, description = "", emblem = null } = req.body;
     if (!ownerId || !ownerUsername || !name || typeof name !== "string" || name.trim().length < 1) {
-      return res.status(400).json({ success: false, error: "Missing or invalid required fields: ownerId, ownerUsername, name" });
+      return res.status(400).json({ success: false, error: "Missing or invalid required fields" });
     }
 
     const data = getData();
