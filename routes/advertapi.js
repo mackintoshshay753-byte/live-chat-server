@@ -3,6 +3,11 @@ const router = express.Router();
 const multer = require("multer");
 const sizeOf = require("image-size");
 const { v4: uuidv4 } = require("uuid");
+const path = require("path"); // Added to match your require style
+const fs = require("fs");
+
+// ✅ Add JSON parsing middleware at the top so it works for all routes
+router.use(express.json());
 
 // Keep everything in memory (no disk writes)
 const storage = multer.memoryStorage();
@@ -15,11 +20,11 @@ const upload = multer({
   limits: { fileSize: 2 * 1024 * 1024 } // 2MB max
 });
 
-const adsDbPath = require("path").join(__dirname, "../data/ads.json");
-const fs = require("fs");
+const adsDbPath = path.join(__dirname, "../data/ads.json");
+// const fs = require("fs"); // Already declared above
 
 const ensureDb = () => {
-  const dir = require("path").dirname(adsDbPath);
+  const dir = path.dirname(adsDbPath);
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
   if (!fs.existsSync(adsDbPath)) fs.writeFileSync(adsDbPath, "[]");
 };
@@ -91,7 +96,8 @@ router.post("/ads", upload.single("ad"), (req, res) => {
 // ✅ GET ONLY YOUR OWN ADS — no one else’s appear here
 router.get("/ads", (req, res) => {
   const userId = req.user?.id || "guest";
-  const userAds = loadAds().filter(a => a.userId === userId);
+  const allAds = loadAds();
+  const userAds = allAds.filter(a => a.userId === userId);
 
   const lightAds = userAds.map(a => ({
     id: a.id,
@@ -124,8 +130,8 @@ router.get("/ads/:id/render", (req, res) => {
   });
 });
 
-// ✅ Only let YOU run/stop your own ads
-router.put("/ads/:id/toggle", express.json(), (req, res) => {
+// ✅ Only let YOU run/stop your own ads — removed duplicate express.json()
+router.put("/ads/:id/toggle", (req, res) => {
   const userId = req.user?.id || "guest";
   const ads = loadAds();
   const ad = ads.find(a => a.id === req.params.id && a.userId === userId);
@@ -135,6 +141,21 @@ router.put("/ads/:id/toggle", express.json(), (req, res) => {
   ad.active = Boolean(req.body.active);
   saveAds(ads);
   res.json({ success: true, ad: { id: ad.id, active: ad.active } });
+});
+
+// ✅ Add DELETE route so users can remove their own ads
+router.delete("/ads/:id", (req, res) => {
+  const userId = req.user?.id || "guest";
+  let ads = loadAds();
+  const adIndex = ads.findIndex(a => a.id === req.params.id && a.userId === userId);
+
+  if (adIndex === -1) {
+    return res.json({ success: false, error: "Ad not found or not yours" });
+  }
+
+  ads.splice(adIndex, 1);
+  saveAds(ads);
+  res.json({ success: true, message: "Ad deleted" });
 });
 
 // ✅ Still shows ALL active ads for the homepage — this is fine
