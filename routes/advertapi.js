@@ -154,4 +154,24 @@ router.get("/ads/active/:size", (req, res) => {
   });
 });
 
+// Get ALL active ads (for everyone, no user filter)
+router.get("/ads/active-all", (req, res) => {
+  const ads = loadAds();
+  // Return only ads marked as active
+  const allActive = ads
+    .filter(a => a.active)
+    .map(a => ({
+      id: a.id,
+      name: a.name,
+      size: a.size,
+      dataUrl: `data:image/png;base64,${a.imageData}`
+    }));
+
+  res.json({
+    success: true,
+    count: allActive.length,
+    activeAds: allActive
+  });
+});
+
 module.exports = router;
