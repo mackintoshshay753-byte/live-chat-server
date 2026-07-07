@@ -1,37 +1,11 @@
 const express = require("express");
 const router = express.Router();
 const multer = require("multer");
-const path = require("path");
-const fs = require("fs");
-const { v4: uuidv4 } = require("uuid");
 const sizeOf = require("image-size");
+const { v4: uuidv4 } = require("uuid");
 
-// --- Setup storage ---
-const uploadDir = path.join(__dirname, "../public/uploads/ads");
-if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
-
-// Use JSON file for storage
-const adsDbPath = path.join(__dirname, "../data/ads.json");
-// Make sure the data folder exists too
-if (!fs.existsSync(path.dirname(adsDbPath))) {
-  fs.mkdirSync(path.dirname(adsDbPath), { recursive: true });
-}
-
-const ensureDb = () => {
-  if (!fs.existsSync(adsDbPath)) fs.writeFileSync(adsDbPath, JSON.stringify([]));
-};
-const loadAds = () => {
-  ensureDb();
-  return JSON.parse(fs.readFileSync(adsDbPath, "utf8"));
-};
-const saveAds = (ads) => fs.writeFileSync(adsDbPath, JSON.stringify(ads, null, 2));
-
-// --- Multer config ---
-const storage = multer.diskStorage({
-  destination: uploadDir,
-  filename: (req, file, cb) => cb(null, `${uuidv4()}.png`)
-});
-
+// Keep everything in memory (no disk writes)
+const storage = multer.memoryStorage();
 const upload = multer({
   storage,
   fileFilter: (req, file, cb) => {
@@ -41,23 +15,36 @@ const upload = multer({
   limits: { fileSize: 2 * 1024 * 1024 } // 2MB max
 });
 
-// --- Validate image size ---
-const validateSize = (filePath) => {
+const adsDbPath = require("path").join(__dirname, "../data/ads.json");
+const fs = require("fs");
+
+const ensureDb = () => {
+  const dir = require("path").dirname(adsDbPath);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  if (!fs.existsSync(adsDbPath)) fs.writeFileSync(adsDbPath, "[]");
+};
+const loadAds = () => {
+  ensureDb();
+  return JSON.parse(fs.readFileSync(adsDbPath, "utf8"));
+};
+const saveAds = (ads) => fs.writeFileSync(adsDbPath, JSON.stringify(ads, null, 2));
+
+// Validate image size from buffer
+const validateSize = (buffer) => {
   try {
-    const dimensions = sizeOf(filePath);
+    const dimensions = sizeOf(buffer);
     const validSizes = ["160x600", "728x90", "300x250"];
+    const size = `${dimensions.width}x${dimensions.height}`;
     return {
-      valid: validSizes.includes(`${dimensions.width}x${dimensions.height}`),
-      size: `${dimensions.width}x${dimensions.height}`
+      valid: validSizes.includes(size),
+      size
     };
-  } catch (err) {
+  } catch {
     return { valid: false, size: null };
   }
 };
 
-// --- API Endpoints ---
-
-// Create new ad
+// Create new ad (store as base64)
 router.post("/ads", upload.single("ad"), (req, res) => {
   try {
     const { name } = req.body;
@@ -67,19 +54,24 @@ router.post("/ads", upload.single("ad"), (req, res) => {
       return res.json({ success: false, error: "Name and PNG file required" });
     }
 
-    const { valid, size } = validateSize(req.file.path);
+    const { valid, size } = validateSize(req.file.buffer);
     if (!valid) {
-      fs.unlinkSync(req.file.path);
-      return res.json({ success: false, error: "Only sizes allowed: 160x600, 728x90, 300x250" });
+      return res.json({
+        success: false,
+        error: "Only sizes allowed: 160x600, 728x90, 300x250"
+      });
     }
+
+    const base64 = req.file.buffer.toString("base64");
 
     const ads = loadAds();
     const ad = {
       id: uuidv4(),
       userId,
       name,
-      size: size,
-      imageUrl: `/uploads/ads/${req.file.filename}`,
+      size,
+      // Store just the base64; we’ll build the data URL on the client
+      imageData: base64,
       active: false,
       createdAt: new Date().toISOString()
     };
@@ -87,17 +79,47 @@ router.post("/ads", upload.single("ad"), (req, res) => {
     ads.push(ad);
     saveAds(ads);
 
-    res.json({ success: true, ad });
+    res.json({ success: true, ad: { id: ad.id, name: ad.name, size: ad.size } });
   } catch (err) {
     res.json({ success: false, error: err.message });
   }
 });
 
-// Get current user's ads
+// Get current user's ads (without sending huge base64 every time if you like)
+// For simplicity, send everything; you can trim later if needed.
 router.get("/ads", (req, res) => {
   const userId = req.user?.id || "guest";
   const userAds = loadAds().filter(a => a.userId === userId);
-  res.json({ success: true, ads: userAds });
+
+  // Optionally strip base64 for list view to keep responses small:
+  const lightAds = userAds.map(a => ({
+    id: a.id,
+    name: a.name,
+    size: a.size,
+    active: a.active,
+    createdAt: a.createdAt
+    // no imageData here
+  }));
+
+  res.json({ success: true, ads: lightAds });
+});
+
+// Get single ad with image data (for rendering)
+router.get("/ads/:id/render", (req, res) => {
+  const ads = loadAds();
+  const ad = ads.find(a => a.id === req.params.id);
+  if (!ad) return res.json({ success: false, error: "Ad not found" });
+
+  res.json({
+    success: true,
+    ad: {
+      id: ad.id,
+      name: ad.name,
+      size: ad.size,
+      active: ad.active,
+      dataUrl: `data:image/png;base64,${ad.imageData}`
+    }
+  });
 });
 
 // Toggle ad active status
@@ -108,15 +130,28 @@ router.put("/ads/:id/toggle", express.json(), (req, res) => {
 
   ad.active = Boolean(req.body.active);
   saveAds(ads);
-  res.json({ success: true, ad });
+  res.json({ success: true, ad: { id: ad.id, active: ad.active } });
 });
 
-// Get active ad by size
+// Get active ad by size (returns data URL)
 router.get("/ads/active/:size", (req, res) => {
   const ads = loadAds();
   const requestedSize = req.params.size;
   const activeAd = ads.find(a => a.active && a.size === requestedSize);
-  res.json({ success: true, activeAd: activeAd || null });
+
+  if (!activeAd) {
+    return res.json({ success: true, activeAd: null });
+  }
+
+  res.json({
+    success: true,
+    activeAd: {
+      id: activeAd.id,
+      name: activeAd.name,
+      size: activeAd.size,
+      dataUrl: `data:image/png;base64,${activeAd.imageData}`
+    }
+  });
 });
 
 module.exports = router;
