@@ -44,7 +44,11 @@ const validateSize = (buffer) => {
   }
 };
 
-// Create new ad (store as base64)
+// --------------------------
+// ROUTES
+// --------------------------
+
+// Create new ad — saves with your user ID
 router.post("/ads", upload.single("ad"), (req, res) => {
   try {
     const { name } = req.body;
@@ -70,7 +74,6 @@ router.post("/ads", upload.single("ad"), (req, res) => {
       userId,
       name,
       size,
-      // Store just the base64; we’ll build the data URL on the client
       imageData: base64,
       active: false,
       createdAt: new Date().toISOString()
@@ -85,30 +88,29 @@ router.post("/ads", upload.single("ad"), (req, res) => {
   }
 });
 
-// Get current user's ads (without sending huge base64 every time if you like)
-// For simplicity, send everything; you can trim later if needed.
+// ✅ GET ONLY YOUR OWN ADS — no one else’s appear here
 router.get("/ads", (req, res) => {
   const userId = req.user?.id || "guest";
   const userAds = loadAds().filter(a => a.userId === userId);
 
-  // Optionally strip base64 for list view to keep responses small:
   const lightAds = userAds.map(a => ({
     id: a.id,
     name: a.name,
     size: a.size,
     active: a.active,
     createdAt: a.createdAt
-    // no imageData here
   }));
 
   res.json({ success: true, ads: lightAds });
 });
 
-// Get single ad with image data (for rendering)
+// ✅ Only let YOU view your own ad image
 router.get("/ads/:id/render", (req, res) => {
+  const userId = req.user?.id || "guest";
   const ads = loadAds();
-  const ad = ads.find(a => a.id === req.params.id);
-  if (!ad) return res.json({ success: false, error: "Ad not found" });
+  const ad = ads.find(a => a.id === req.params.id && a.userId === userId);
+
+  if (!ad) return res.json({ success: false, error: "Ad not found or not yours" });
 
   res.json({
     success: true,
@@ -122,18 +124,20 @@ router.get("/ads/:id/render", (req, res) => {
   });
 });
 
-// Toggle ad active status
+// ✅ Only let YOU run/stop your own ads
 router.put("/ads/:id/toggle", express.json(), (req, res) => {
+  const userId = req.user?.id || "guest";
   const ads = loadAds();
-  const ad = ads.find(a => a.id === req.params.id);
-  if (!ad) return res.json({ success: false, error: "Ad not found" });
+  const ad = ads.find(a => a.id === req.params.id && a.userId === userId);
+
+  if (!ad) return res.json({ success: false, error: "Ad not found or not yours" });
 
   ad.active = Boolean(req.body.active);
   saveAds(ads);
   res.json({ success: true, ad: { id: ad.id, active: ad.active } });
 });
 
-// Get active ad by size (returns data URL)
+// ✅ Still shows ALL active ads for the homepage — this is fine
 router.get("/ads/active/:size", (req, res) => {
   const ads = loadAds();
   const requestedSize = req.params.size;
@@ -157,7 +161,10 @@ router.get("/ads/active/:size", (req, res) => {
 router.get("/ads/active-all", (req, res) => {
   const ads = loadAds();
   const activeAds = ads.filter(a => a.active).map(a => ({
-    id: a.id, name: a.name, size: a.size, dataUrl: `data:image/png;base64,${a.imageData}`
+    id: a.id,
+    name: a.name,
+    size: a.size,
+    dataUrl: `data:image/png;base64,${a.imageData}`
   }));
   res.json({ success: true, activeAds });
 });
