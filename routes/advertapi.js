@@ -3,6 +3,20 @@ const router = express.Router();
 const multer = require("multer");
 const sizeOf = require("image-size");
 const { v4: uuidv4 } = require("uuid");
+const fs = require("fs");
+const path = require("path");
+const cors = require("cors");
+
+// ✅ Add CORS to allow requests from any origin
+router.use(cors({
+  origin: "*", // Allow all domains (you can restrict later if needed)
+  credentials: false,
+  methods: ["GET", "POST", "PUT", "DELETE"],
+  allowedHeaders: ["Content-Type", "Accept"]
+}));
+
+// ✅ Add JSON parsing middleware
+router.use(express.json({ limit: "2mb" }));
 
 // Keep everything in memory (no disk writes)
 const storage = multer.memoryStorage();
@@ -15,18 +29,19 @@ const upload = multer({
   limits: { fileSize: 2 * 1024 * 1024 } // 2MB max
 });
 
-const adsDbPath = require("path").join(__dirname, "../data/ads.json");
-const fs = require("fs");
+const adsDbPath = path.join(__dirname, "../data/ads.json");
 
 const ensureDb = () => {
-  const dir = require("path").dirname(adsDbPath);
+  const dir = path.dirname(adsDbPath);
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
   if (!fs.existsSync(adsDbPath)) fs.writeFileSync(adsDbPath, "[]");
 };
+
 const loadAds = () => {
   ensureDb();
   return JSON.parse(fs.readFileSync(adsDbPath, "utf8"));
 };
+
 const saveAds = (ads) => fs.writeFileSync(adsDbPath, JSON.stringify(ads, null, 2));
 
 // Validate image size from buffer
@@ -35,16 +50,13 @@ const validateSize = (buffer) => {
     const dimensions = sizeOf(buffer);
     const validSizes = ["160x600", "728x90", "300x250"];
     const size = `${dimensions.width}x${dimensions.height}`;
-    return {
-      valid: validSizes.includes(size),
-      size
-    };
+    return { valid: validSizes.includes(size), size };
   } catch {
     return { valid: false, size: null };
   }
 };
 
-// Create new ad (store as base64)
+// Create new ad
 router.post("/ads", upload.single("ad"), (req, res) => {
   try {
     const { name } = req.body;
@@ -70,7 +82,6 @@ router.post("/ads", upload.single("ad"), (req, res) => {
       userId,
       name,
       size,
-      // Store just the base64; we’ll build the data URL on the client
       imageData: base64,
       active: false,
       createdAt: new Date().toISOString()
@@ -85,26 +96,23 @@ router.post("/ads", upload.single("ad"), (req, res) => {
   }
 });
 
-// Get current user's ads (without sending huge base64 every time if you like)
-// For simplicity, send everything; you can trim later if needed.
+// Get current user's ads
 router.get("/ads", (req, res) => {
   const userId = req.user?.id || "guest";
   const userAds = loadAds().filter(a => a.userId === userId);
 
-  // Optionally strip base64 for list view to keep responses small:
   const lightAds = userAds.map(a => ({
     id: a.id,
     name: a.name,
     size: a.size,
     active: a.active,
     createdAt: a.createdAt
-    // no imageData here
   }));
 
   res.json({ success: true, ads: lightAds });
 });
 
-// Get single ad with image data (for rendering)
+// Get single ad with image data
 router.get("/ads/:id/render", (req, res) => {
   const ads = loadAds();
   const ad = ads.find(a => a.id === req.params.id);
@@ -123,7 +131,7 @@ router.get("/ads/:id/render", (req, res) => {
 });
 
 // Toggle ad active status
-router.put("/ads/:id/toggle", express.json(), (req, res) => {
+router.put("/ads/:id/toggle", (req, res) => {
   const ads = loadAds();
   const ad = ads.find(a => a.id === req.params.id);
   if (!ad) return res.json({ success: false, error: "Ad not found" });
@@ -133,7 +141,7 @@ router.put("/ads/:id/toggle", express.json(), (req, res) => {
   res.json({ success: true, ad: { id: ad.id, active: ad.active } });
 });
 
-// Get active ad by size (returns data URL)
+// Get active ad by size
 router.get("/ads/active/:size", (req, res) => {
   const ads = loadAds();
   const requestedSize = req.params.size;
@@ -154,12 +162,20 @@ router.get("/ads/active/:size", (req, res) => {
   });
 });
 
+// ✅ This is the route your home page uses — fixed
 router.get("/ads/active-all", (req, res) => {
-  const ads = loadAds();
-  const activeAds = ads.filter(a => a.active).map(a => ({
-    id: a.id, name: a.name, size: a.size, dataUrl: `data:image/png;base64,${a.imageData}`
-  }));
-  res.json({ success: true, activeAds });
+  try {
+    const ads = loadAds();
+    const activeAds = ads.filter(a => a.active).map(a => ({
+      id: a.id,
+      name: a.name,
+      size: a.size,
+      dataUrl: `data:image/png;base64,${a.imageData}`
+    }));
+    res.json({ success: true, activeAds });
+  } catch (err) {
+    res.json({ success: false, error: err.message });
+  }
 });
 
 module.exports = router;
