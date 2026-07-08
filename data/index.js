@@ -15,7 +15,8 @@ const DEFAULT_DATA = {
   friends: {},
   messages: {},
   moderationLogs: [],
-  deletedAccounts: {}
+  deletedAccounts: {},
+  ads: {}
 };
 
 // In-memory data reference

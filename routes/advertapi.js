@@ -1,184 +1,130 @@
-const express = require("express");
+const express = require('express');
+const multer = require('multer');
 const router = express.Router();
-const multer = require("multer");
-const sizeOf = require("image-size");
-const { v4: uuidv4 } = require("uuid");
 
-// Keep everything in memory (no disk writes)
-const storage = multer.memoryStorage();
+// Import ONLY from your existing data.js (unchanged)
+const { data, saveData } = require('../data');
+
+// Configure file upload: max 2MB, PNG only
 const upload = multer({
-  storage,
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 2 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
-    if (file.mimetype === "image/png") cb(null, true);
-    else cb(new Error("Only PNG files allowed"), false);
-  },
-  limits: { fileSize: 2 * 1024 * 1024 } // 2MB max
+    if (file.mimetype === 'image/png') cb(null, true);
+    else cb(new Error('Only PNG files are allowed'), false);
+  }
 });
 
-const adsDbPath = require("path").join(__dirname, "../data/ads.json");
-const fs = require("fs");
+// ------------------------------
+// Helper functions
+// ------------------------------
+function createAd(ownerId, ownerName, name, base64Data) {
+  // Use timestamp as unique ID (no counter needed)
+  const adId = Date.now().toString();
+  data.ads[adId] = {
+    id: adId,
+    name: name.trim(),
+    ownerId: ownerId,
+    ownerName: ownerName,
+    image: base64Data,
+    active: false,
+    createdAt: new Date().toISOString()
+  };
+  return adId;
+}
 
-const ensureDb = () => {
-  const dir = require("path").dirname(adsDbPath);
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  if (!fs.existsSync(adsDbPath)) fs.writeFileSync(adsDbPath, "[]");
-};
-const loadAds = () => {
-  ensureDb();
-  return JSON.parse(fs.readFileSync(adsDbPath, "utf8"));
-};
-const saveAds = (ads) => fs.writeFileSync(adsDbPath, JSON.stringify(ads, null, 2));
+function getAd(adId) {
+  return data.ads[adId] || null;
+}
 
-// Validate image size from buffer
-const validateSize = (buffer) => {
-  try {
-    const dimensions = sizeOf(buffer);
-    const validSizes = ["160x600", "728x90", "300x250"];
-    const size = `${dimensions.width}x${dimensions.height}`;
-    return {
-      valid: validSizes.includes(size),
-      size
-    };
-  } catch {
-    return { valid: false, size: null };
+function getAdsByOwner(ownerId) {
+  return Object.values(data.ads).filter(ad => ad.ownerId === ownerId);
+}
+
+function toggleAdStatus(adId, newStatus) {
+  if (data.ads[adId]) {
+    data.ads[adId].active = newStatus;
+    return data.ads[adId];
   }
-};
+  return null;
+}
 
-// Create new ad (store as base64)
-router.post("/ads", upload.single("ad"), (req, res) => {
+function getAllActiveAds() {
+  return Object.values(data.ads).filter(ad => ad.active);
+}
+
+// ------------------------------
+// API Endpoints
+// ------------------------------
+
+// Upload new ad — matches your frontend fetch call
+router.post('/ads', upload.single('ad'), async (req, res) => {
   try {
     const { name } = req.body;
-    const userId = req.user?.id || "guest";
+    const user = req.session?.user; // Uses your existing session system
 
-    if (!name || !req.file) {
-      return res.json({ success: false, error: "Name and PNG file required" });
+    if (!user || !user.id) {
+      return res.json({ success: false, error: 'Not logged in' });
+    }
+    if (!name || !name.trim()) {
+      return res.json({ success: false, error: 'Ad name is required' });
+    }
+    if (!req.file) {
+      return res.json({ success: false, error: 'Please select a PNG file' });
     }
 
-    const { valid, size } = validateSize(req.file.buffer);
-    if (!valid) {
-      return res.json({
-        success: false,
-        error: "Only sizes allowed: 160x600, 728x90, 300x250"
-      });
-    }
+    // Convert file to base64
+    const base64 = `data:image/png;base64,${req.file.buffer.toString('base64')}`;
+    const newAdId = createAd(user.id, user.username, name, base64);
 
-    const base64 = req.file.buffer.toString("base64");
+    await saveData(); // Saves to chat-data.json
 
-    const ads = loadAds();
-    const ad = {
-      id: uuidv4(),
-      userId,
-      name,
-      size,
-      // Store just the base64; we’ll build the data URL on the client
-      imageData: base64,
-      active: false,
-      createdAt: new Date().toISOString()
-    };
-
-    ads.push(ad);
-    saveAds(ads);
-
-    res.json({ success: true, ad: { id: ad.id, name: ad.name, size: ad.size } });
+    res.json({ success: true, adId: newAdId });
   } catch (err) {
-    res.json({ success: false, error: err.message });
+    console.error('Ad upload error:', err);
+    res.json({ success: false, error: err.message || 'Upload failed' });
   }
 });
 
-// Get current user's ads (without sending huge base64 every time if you like)
-// For simplicity, send everything; you can trim later if needed.
-router.get("/ads", (req, res) => {
-  const userId = req.user?.id || "guest";
-  const userAds = loadAds().filter(a => a.userId === userId);
-
-  // Optionally strip base64 for list view to keep responses small:
-  const lightAds = userAds.map(a => ({
-    id: a.id,
-    name: a.name,
-    size: a.size,
-    active: a.active,
-    createdAt: a.createdAt
-    // no imageData here
-  }));
-
-  res.json({ success: true, ads: lightAds });
+// Get all ads for current user
+router.get('/ads', (req, res) => {
+  const user = req.session?.user;
+  if (!user || !user.id) {
+    return res.json({ success: false, error: 'Unauthorized' });
+  }
+  const ads = getAdsByOwner(user.id);
+  res.json({ success: true, ads });
 });
 
-// Get single ad with image data (for rendering)
-router.get("/ads/:id/render", (req, res) => {
-  const ads = loadAds();
-  const ad = ads.find(a => a.id === req.params.id);
-  if (!ad) return res.json({ success: false, error: "Ad not found" });
-
-  res.json({
-    success: true,
-    ad: {
-      id: ad.id,
-      name: ad.name,
-      size: ad.size,
-      active: ad.active,
-      dataUrl: `data:image/png;base64,${ad.imageData}`
-    }
-  });
+// Get single ad image/data
+router.get('/ads/:id/render', (req, res) => {
+  const ad = getAd(req.params.id);
+  if (!ad) {
+    return res.json({ success: false, error: 'Ad not found' });
+  }
+  res.json({ success: true, ad: { dataUrl: ad.image } });
 });
 
-// Toggle ad active status
-router.put("/ads/:id/toggle", express.json(), (req, res) => {
-  const ads = loadAds();
-  const ad = ads.find(a => a.id === req.params.id);
-  if (!ad) return res.json({ success: false, error: "Ad not found" });
+// Toggle ad active/inactive
+router.put('/ads/:id/toggle', express.json(), async (req, res) => {
+  const adId = req.params.id;
+  const { active } = req.body;
+  const user = req.session?.user;
 
-  ad.active = Boolean(req.body.active);
-  saveAds(ads);
-  res.json({ success: true, ad: { id: ad.id, active: ad.active } });
+  const ad = getAd(adId);
+  if (!ad || !user || ad.ownerId !== user.id) {
+    return res.json({ success: false, error: 'Unauthorized or ad not found' });
+  }
+
+  const updated = toggleAdStatus(adId, active);
+  await saveData();
+  res.json({ success: true, ad: updated });
 });
 
-let lastShown = {};
-
-router.get("/ads/active/:size", (req, res) => {
-    const size = req.params.size;
-
-    const ads = loadAds().filter(a => a.active && a.size === size);
-
-    if (!ads.length)
-        return res.json({ success: true, activeAd: null });
-
-    let index = (lastShown[size] ?? -1) + 1;
-
-    if (index >= ads.length)
-        index = 0;
-
-    lastShown[size] = index;
-
-    const ad = ads[index];
-
-    res.json({
-        success: true,
-        activeAd: {
-            id: ad.id,
-            name: ad.name,
-            size: ad.size,
-            dataUrl: `data:image/png;base64,${ad.imageData}`
-        }
-    });
-});
-
-router.get("/ads/active-all", (req, res) => {
-    const shuffledAds = loadAds()
-        .filter(ad => ad.active)
-        .sort(() => Math.random() - 0.5);
-
-    const activeAds = shuffledAds.map(ad => ({
-        id: ad.id,
-        name: ad.name,
-        size: ad.size,
-        dataUrl: `data:image/png;base64,${ad.imageData}`
-    }));
-
-    res.json({
-        success: true,
-        activeAds
-    });
+// Get all active ads for display site-wide
+router.get('/ads/active/all', (req, res) => {
+  const ads = getAllActiveAds();
+  res.json({ success: true, ads });
 });
 
 module.exports = router;
