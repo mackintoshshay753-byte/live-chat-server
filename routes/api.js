@@ -18,12 +18,18 @@ router.get("/profile/:id", (req, res) => {
       return res.status(404).json({ error: "User not found" });
     }
 
+    // Get matching account to check online status
+    const accountEntry = Object.entries(data.accounts).find(([_, acc]) => acc.id === Number(req.params.id));
+    const username = accountEntry ? accountEntry[0] : null;
+    const isOnline = username ? onlineUsers.has(username) : false;
+
     res.json({
       ...profile,
       bio: profile.bio ?? "",
       birthday: profile.birthday ?? null,
       gender: profile.gender ?? null,
-      status: profile.status ?? ""
+      status: profile.status ?? "",
+      isOnline // ✅ Add this line — matches the same logic as your search route
     });
 
   } catch (err) {
