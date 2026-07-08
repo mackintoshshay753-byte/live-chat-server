@@ -3,7 +3,7 @@ const router = express.Router();
 
 const { onlineUsers } = require('../sockets');
 const { getProfileById, clean, updateStatus } = require('../helpers');
-const { data, saveData } = require('../data');
+const { data, saveData, getAvatarUrl } = require('../data'); // ✅ add getAvatarUrl
 
 // ----------------------
 // PROFILE
@@ -11,21 +11,18 @@ const { data, saveData } = require('../data');
 router.get("/profile/:id", (req, res) => {
   try {
     const profile = getProfileById(req.params.id);
+    if (!profile) return res.status(404).json({ error: "User not found" });
 
-    console.log("PROFILE RETURNED:", profile);
-
-    if (!profile) {
-      return res.status(404).json({ error: "User not found" });
-    }
+    const avatarUrl = getAvatarUrl(profile.id, profile.gender); // ✅
 
     res.json({
       ...profile,
       bio: profile.bio ?? "",
       birthday: profile.birthday ?? null,
       gender: profile.gender ?? null,
-      status: profile.status ?? ""
+      status: profile.status ?? "",
+      avatarUrl // ✅ send to client
     });
-
   } catch (err) {
     console.error("Profile API Error:", err);
     res.status(500).json({ error: "Server error" });
@@ -33,81 +30,17 @@ router.get("/profile/:id", (req, res) => {
 });
 
 // ----------------------
-// UPDATE BIO
+// FEED POSTS
 // ----------------------
-router.post("/profile/update-bio", (req, res) => {
-  try {
-    const { userId, bio } = req.body;
-    if (!userId) return res.json({ success: false });
-
-    const profile = Object.values(data.userProfiles)
-      .find(p => p.id === Number(userId));
-
-    if (!profile) return res.json({ success: false });
-
-    profile.bio = (bio || "").trim().slice(0, 500);
-    saveData();
-
-    res.json({ success: true });
-
-  } catch (err) {
-    console.error("Update Bio API Error:", err);
-    res.json({ success: false });
-  }
-});
-
-// ----------------------
-// UPDATE STATUS (✅ FIX YOU NEEDED)
-// ----------------------
-router.post("/profile/update-status", async (req, res) => {
-  try {
-    const { userId, status } = req.body;
-
-    if (!userId) {
-      return res.status(400).json({ success: false, error: "Missing userId" });
-    }
-
-    const result = await updateStatus(userId, status);
-
-    if (!result.success) {
-      return res.status(400).json(result);
-    }
-
-    return res.json(result);
-
-  } catch (err) {
-    console.error("Update Status API Error:", err);
-    return res.status(500).json({ success: false, error: "Server error" });
-  }
-});
-
-router.get("/feed", (req, res) => {
-  try {
-    // Initialize posts array if it doesn't exist
-    if (!data.feedPosts) data.feedPosts = [];
-
-    // Return newest first
-    const sorted = [...data.feedPosts].sort(
-      (a, b) => new Date(b.createdAt) - new Date(a.createdAt)
-    );
-
-    res.json(sorted);
-  } catch (err) {
-    console.error("Get Feed Error:", err);
-    res.status(500).json({ error: "Could not load feed" });
-  }
-});
-
 router.post("/feed/post", (req, res) => {
   try {
     const { authorId, username, content } = req.body;
-
     if (!authorId || !username || !content.trim()) {
       return res.status(400).json({ error: "Missing required fields" });
     }
 
-    // Get user's gender for avatar
     const profile = getProfileById(authorId) || {};
+    const avatarUrl = getAvatarUrl(authorId, profile.gender); // ✅
 
     const newPost = {
       id: Date.now().toString(),
@@ -115,15 +48,14 @@ router.post("/feed/post", (req, res) => {
       username,
       content: content.trim().slice(0, 254),
       gender: profile.gender || "Male",
+      avatarUrl, // ✅
       createdAt: new Date().toISOString()
     };
 
-    // Save to data store
     if (!data.feedPosts) data.feedPosts = [];
     data.feedPosts.push(newPost);
     saveData();
 
-    // Emit to all connected users in real‑time
     const io = req.app.get("io");
     if (io) io.emit("new-post", newPost);
 
@@ -154,11 +86,13 @@ router.get("/search/users", (req, res) => {
       if (username.toLowerCase().includes(keyword)) {
         const profile = data.userProfiles[username] || {};
         const isOnline = onlineUsers.has(username);
+        const avatarUrl = getAvatarUrl(info.id, profile.gender); // ✅
 
         matches.push({
           id: info.id,
           username,
           gender: profile.gender || "Male",
+          avatarUrl, // ✅
           isOnline,
           lastOnline: profile.lastOnline || null
         });
@@ -166,7 +100,6 @@ router.get("/search/users", (req, res) => {
     });
 
     matches.sort((a, b) => a.username.localeCompare(b.username));
-
     const total = matches.length;
     const pages = Math.ceil(total / limit);
     const start = (page - 1) * limit;
@@ -177,10 +110,51 @@ router.get("/search/users", (req, res) => {
       page,
       pages
     });
-
   } catch (err) {
     console.error("Search API Error:", err);
     res.status(500).json({ error: "Server error" });
+  }
+});
+
+// ----------------------
+// Keep your existing routes below
+// ----------------------
+router.post("/profile/update-bio", (req, res) => {
+  try {
+    const { userId, bio } = req.body;
+    if (!userId) return res.json({ success: false });
+    const profile = Object.values(data.userProfiles).find(p => p.id === Number(userId));
+    if (!profile) return res.json({ success: false });
+    profile.bio = (bio || "").trim().slice(0, 500);
+    saveData();
+    res.json({ success: true });
+  } catch (err) {
+    console.error("Update Bio API Error:", err);
+    res.json({ success: false });
+  }
+});
+
+router.post("/profile/update-status", async (req, res) => {
+  try {
+    const { userId, status } = req.body;
+    if (!userId) return res.status(400).json({ success: false, error: "Missing userId" });
+    const result = await updateStatus(userId, status);
+    if (!result.success) return res.status(400).json(result);
+    return res.json(result);
+  } catch (err) {
+    console.error("Update Status API Error:", err);
+    return res.status(500).json({ success: false, error: "Server error" });
+  }
+});
+
+router.get("/feed", (req, res) => {
+  try {
+    if (!data.feedPosts) data.feedPosts = [];
+    const sorted = [...data.feedPosts].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    res.json(sorted);
+  } catch (err) {
+    console.error("Get Feed Error:", err);
+    res.status(500).json({ error: "Could not load feed" });
   }
 });
 
