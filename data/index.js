@@ -16,6 +16,8 @@ const DEFAULT_DATA = {
   messages: {},
   moderationLogs: [],
   deletedAccounts: {},
+  groups: [],
+  nextGroupId: 1,
   ads: {}
 };
 
