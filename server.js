@@ -75,8 +75,9 @@ app.options(/.*/, cors(corsOptions));
 
 // ---------------- Body Parser ----------------
 app.use(express.json({
-    limit: "10kb"
+    limit: "5mb" // Allow up to 5MB — more than enough for any group icon
 }));
+app.use(express.urlencoded({ limit: "5mb", extended: true }));
 
 // ---------------- Static ----------------
 app.use(express.static(path.join(__dirname, "public"), {
