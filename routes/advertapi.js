@@ -1,130 +1,167 @@
-const express = require('express');
-const multer = require('multer');
+const express = require("express");
 const router = express.Router();
+const multer = require("multer");
+const sizeOf = require("image-size");
+const { v4: uuidv4 } = require("uuid");
 
-// Import ONLY from your existing data.js (unchanged)
-const { data, saveData } = require('../data');
+// ✅ Import YOUR existing data system — no separate files!
+const { data, saveData } = require("../data");
 
-// Configure file upload: max 2MB, PNG only
+// Multer config — keep in memory
+const storage = multer.memoryStorage();
 const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: 2 * 1024 * 1024 },
+  storage,
   fileFilter: (req, file, cb) => {
-    if (file.mimetype === 'image/png') cb(null, true);
-    else cb(new Error('Only PNG files are allowed'), false);
-  }
+    if (file.mimetype === "image/png") cb(null, true);
+    else cb(new Error("Only PNG files allowed"), false);
+  },
+  limits: { fileSize: 2 * 1024 * 1024 } // 2MB max
 });
 
-// ------------------------------
-// Helper functions
-// ------------------------------
-function createAd(ownerId, ownerName, name, base64Data) {
-  // Use timestamp as unique ID (no counter needed)
-  const adId = Date.now().toString();
-  data.ads[adId] = {
-    id: adId,
-    name: name.trim(),
-    ownerId: ownerId,
-    ownerName: ownerName,
-    image: base64Data,
-    active: false,
-    createdAt: new Date().toISOString()
-  };
-  return adId;
-}
-
-function getAd(adId) {
-  return data.ads[adId] || null;
-}
-
-function getAdsByOwner(ownerId) {
-  return Object.values(data.ads).filter(ad => ad.ownerId === ownerId);
-}
-
-function toggleAdStatus(adId, newStatus) {
-  if (data.ads[adId]) {
-    data.ads[adId].active = newStatus;
-    return data.ads[adId];
-  }
-  return null;
-}
-
-function getAllActiveAds() {
-  return Object.values(data.ads).filter(ad => ad.active);
-}
-
-// ------------------------------
-// API Endpoints
-// ------------------------------
-
-// Upload new ad — matches your frontend fetch call
-router.post('/ads', upload.single('ad'), async (req, res) => {
+// Validate allowed ad sizes
+const validateSize = (buffer) => {
   try {
-    const { name } = req.body;
-    const user = req.session?.user; // Uses your existing session system
+    const dimensions = sizeOf(buffer);
+    const validSizes = ["160x600", "728x90", "300x250"];
+    const size = `${dimensions.width}x${dimensions.height}`;
+    return { valid: validSizes.includes(size), size };
+  } catch {
+    return { valid: false, size: null };
+  }
+};
 
-    if (!user || !user.id) {
-      return res.json({ success: false, error: 'Not logged in' });
+// Create new ad — saves into your existing data.ads
+router.post("/ads", upload.single("ad"), async (req, res) => {
+  try {
+    const { name, userId, username } = req.body;
+
+    if (!name || !userId || !username || !req.file) {
+      return res.json({ success: false, error: "Name, user, and PNG file required" });
     }
-    if (!name || !name.trim()) {
-      return res.json({ success: false, error: 'Ad name is required' });
+
+    const { valid, size } = validateSize(req.file.buffer);
+    if (!valid) {
+      return res.json({
+        success: false,
+        error: "Only sizes allowed: 160x600, 728x90, 300x250"
+      });
     }
-    if (!req.file) {
-      return res.json({ success: false, error: 'Please select a PNG file' });
-    }
 
-    // Convert file to base64
-    const base64 = `data:image/png;base64,${req.file.buffer.toString('base64')}`;
-    const newAdId = createAd(user.id, user.username, name, base64);
+    const base64 = req.file.buffer.toString("base64");
+    const adId = uuidv4();
 
-    await saveData(); // Saves to chat-data.json
+    // ✅ Store ad directly in your main data object
+    data.ads[adId] = {
+      id: adId,
+      ownerId: userId,
+      ownerName: username, // ✅ Shows exactly who owns it
+      name,
+      size,
+      imageData: base64,
+      active: false,
+      createdAt: new Date().toISOString()
+    };
 
-    res.json({ success: true, adId: newAdId });
+    // ✅ Use YOUR existing atomic save function
+    await saveData();
+
+    res.json({
+      success: true,
+      ad: { id: adId, name, size, ownerName: username }
+    });
   } catch (err) {
-    console.error('Ad upload error:', err);
-    res.json({ success: false, error: err.message || 'Upload failed' });
+    res.json({ success: false, error: err.message });
   }
 });
 
-// Get all ads for current user
-router.get('/ads', (req, res) => {
-  const user = req.session?.user;
-  if (!user || !user.id) {
-    return res.json({ success: false, error: 'Unauthorized' });
-  }
-  const ads = getAdsByOwner(user.id);
-  res.json({ success: true, ads });
+// Get all ads for a specific user
+router.get("/ads", (req, res) => {
+  const userId = req.query.userId;
+  if (!userId) return res.json({ success: false, error: "Missing userId" });
+
+  const userAds = Object.values(data.ads || {})
+    .filter(ad => ad.ownerId === userId)
+    .map(ad => ({
+      id: ad.id,
+      name: ad.name,
+      size: ad.size,
+      active: ad.active,
+      ownerId: ad.ownerId,
+      ownerName: ad.ownerName,
+      createdAt: ad.createdAt
+    }));
+
+  res.json({ success: true, ads: userAds });
 });
 
-// Get single ad image/data
-router.get('/ads/:id/render', (req, res) => {
-  const ad = getAd(req.params.id);
-  if (!ad) {
-    return res.json({ success: false, error: 'Ad not found' });
-  }
-  res.json({ success: true, ad: { dataUrl: ad.image } });
+// Get single ad with full image + owner info
+router.get("/ads/:id/render", (req, res) => {
+  const ad = data.ads?.[req.params.id];
+  if (!ad) return res.json({ success: false, error: "Ad not found" });
+
+  res.json({
+    success: true,
+    ad: {
+      id: ad.id,
+      name: ad.name,
+      size: ad.size,
+      active: ad.active,
+      ownerId: ad.ownerId,
+      ownerName: ad.ownerName,
+      dataUrl: `data:image/png;base64,${ad.imageData}`
+    }
+  });
 });
 
-// Toggle ad active/inactive
-router.put('/ads/:id/toggle', express.json(), async (req, res) => {
-  const adId = req.params.id;
-  const { active } = req.body;
-  const user = req.session?.user;
+// Toggle active status
+router.put("/ads/:id/toggle", express.json(), async (req, res) => {
+  const ad = data.ads?.[req.params.id];
+  if (!ad) return res.json({ success: false, error: "Ad not found" });
 
-  const ad = getAd(adId);
-  if (!ad || !user || ad.ownerId !== user.id) {
-    return res.json({ success: false, error: 'Unauthorized or ad not found' });
-  }
-
-  const updated = toggleAdStatus(adId, active);
+  ad.active = Boolean(req.body.active);
   await saveData();
-  res.json({ success: true, ad: updated });
+
+  res.json({ success: true, ad: { id: ad.id, active: ad.active, ownerName: ad.ownerName } });
 });
 
-// Get all active ads for display site-wide
-router.get('/ads/active/all', (req, res) => {
-  const ads = getAllActiveAds();
-  res.json({ success: true, ads });
+// Get active ads by size (rotates through them)
+let lastShown = {};
+router.get("/ads/active/:size", (req, res) => {
+  const size = req.params.size;
+  const ads = Object.values(data.ads || {}).filter(a => a.active && a.size === size);
+
+  if (!ads.length) return res.json({ success: true, activeAd: null });
+
+  const index = (lastShown[size] ?? -1) + 1 >= ads.length ? 0 : (lastShown[size] ?? -1) + 1;
+  lastShown[size] = index;
+  const ad = ads[index];
+
+  res.json({
+    success: true,
+    activeAd: {
+      id: ad.id,
+      name: ad.name,
+      size: ad.size,
+      ownerName: ad.ownerName,
+      dataUrl: `data:image/png;base64,${ad.imageData}`
+    }
+  });
+});
+
+// Get all active ads, shuffled
+router.get("/ads/active-all", (req, res) => {
+  const activeAds = Object.values(data.ads || {})
+    .filter(a => a.active)
+    .sort(() => Math.random() - 0.5)
+    .map(ad => ({
+      id: ad.id,
+      name: ad.name,
+      size: ad.size,
+      ownerName: ad.ownerName,
+      dataUrl: `data:image/png;base64,${ad.imageData}`
+    }));
+
+  res.json({ success: true, activeAds });
 });
 
 module.exports = router;
