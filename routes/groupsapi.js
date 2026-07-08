@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { data, saveData } = require('./data');
+const { data, saveData } = require('../data');
 
 router.post('/create', async (req, res) => {
   try {
