@@ -65,12 +65,12 @@ function setupSockets(io) {
     const clientIp = socket.handshake.address || socket.handshake.headers['x-forwarded-for'] || 'unknown';
     let currentUser = null;
     let currentUserId = null;
-    let heartbeatTimer = null;
+    let heartbeatInterval = null;
 
     console.log(`🔌 User connected | IP: ${clientIp}`);
 
     // --------------------------
-    // Join / Mark Online
+    // Mark user online
     // --------------------------
     const markOnline = (username) => {
       try {
@@ -104,37 +104,51 @@ function setupSockets(io) {
     socket.on("join", (username) => markOnline(username));
 
     // --------------------------
-    // ✅ HEARTBEAT — Keep user online while tab is open
+    // Heartbeat — keep online while active
     // --------------------------
     socket.on("heartbeat", (username) => {
       if (!username || username !== currentUser) return;
-      // Refresh status every ping
       const profile = data.userProfiles[username];
-      if (profile && !profile.isOnline) {
-        profile.isOnline = true;
+      if (profile) {
         profile.lastOnline = new Date().toISOString();
-        saveData();
-        io.emit("user-status", { userId: currentUserId, isOnline: true });
+        profile.isOnline = true;
+        onlineUsers.set(username, socket.id);
       }
-      // Keep Map entry fresh
-      onlineUsers.set(username, socket.id);
     });
 
     // --------------------------
-    // Disconnect / Mark Offline
+    // ✅ FIXED DISCONNECT LOGIC
     // --------------------------
     socket.on("disconnect", (reason) => {
       try {
-        // Clear heartbeat timer
-        if (heartbeatTimer) clearTimeout(heartbeatTimer);
+        // Stop heartbeat
+        if (heartbeatInterval) clearInterval(heartbeatInterval);
 
-        // Only mark offline if it's a real close, not just idle/ping timeout
-        const isTemporary = reason === "ping timeout" || reason === "transport close" || reason === "transport error";
-        if (isTemporary) {
-          console.log(`⏱️ ${currentUser} temporary disconnect — waiting for reconnect`);
+        // ✅ Only treat as temporary if it's a ping timeout
+        // All other reasons = actual disconnect / tab closed
+        const isTemporary = reason === "ping timeout";
+
+        if (isTemporary && currentUser) {
+          console.log(`⏱️ ${currentUser} ping timeout — waiting up to 15s for reconnect`);
+          // Give 15s to reconnect before marking offline
+          setTimeout(() => {
+            if (socket.connected || !currentUser) return;
+            if (onlineUsers.get(currentUser) !== socket.id) return;
+
+            onlineUsers.delete(currentUser);
+            const profile = data.userProfiles[currentUser];
+            if (profile) {
+              profile.isOnline = false;
+              profile.lastOnline = new Date().toISOString();
+              saveData();
+              io.emit("user-status", { userId: currentUserId, isOnline: false });
+            }
+            console.log(`👤 ${currentUser} went offline (timeout)`);
+          }, 15000);
           return;
         }
 
+        // ✅ Mark offline immediately for real disconnects
         if (currentUser && currentUserId) {
           onlineUsers.delete(currentUser);
           const profile = data.userProfiles[currentUser];
@@ -144,15 +158,16 @@ function setupSockets(io) {
             saveData();
             io.emit("user-status", { userId: currentUserId, isOnline: false });
           }
-          console.log(`👤 ${currentUser} went offline | Total: ${onlineUsers.size}`);
+          console.log(`👤 ${currentUser} went offline | Reason: ${reason} | Total: ${onlineUsers.size}`);
         }
+
       } catch (err) {
         console.error('Disconnect error:', err);
       }
     });
 
     // --------------------------
-    // Re‑join after auto‑reconnect
+    // Reconnect handling
     // --------------------------
     socket.on("reconnect", () => {
       if (currentUser) {
@@ -161,6 +176,9 @@ function setupSockets(io) {
       }
     });
 
+    // --------------------------
+    // Rest of your events — NO CHANGES NEEDED
+    // --------------------------
     socket.on("login", async ({ username, password }, cb) => {
       try {
         const name = sanitizeUsername(username);
@@ -416,61 +434,54 @@ function setupSockets(io) {
     });
 
     // --------------------------
-    // ✅ UPDATED CHAT FUNCTIONS — matches your frontend exactly
+    // Chat functions
     // --------------------------
+    socket.on("load-messages", async ({ friendId }) => {
+      if (!currentUserId || !friendId) return;
+      const convId = getChatId(currentUserId, friendId);
+      const history = data.messages[convId] || [];
 
-    // Load past messages + ensure gender is present
-socket.on("load-messages", async ({ friendId }) => {
-  if (!currentUserId || !friendId) return;
-  const convId = getChatId(currentUserId, friendId);
-  const history = data.messages[convId] || [];
+      const messagesWithGender = history.map(msg => {
+        if (!msg.gender && msg.from) {
+          const sender = Object.values(data.userProfiles).find(p => p.id === msg.from);
+          msg.gender = sender?.gender || null;
+        }
+        return msg;
+      });
 
-  // Enrich messages with sender gender if missing
-  const messagesWithGender = history.map(msg => {
-    if (!msg.gender && msg.from) {
-      const sender = Object.values(data.userProfiles).find(p => p.id === msg.from);
-      msg.gender = sender?.gender || null;
-    }
-    return msg;
-  });
+      socket.emit("chat-history", { messages: messagesWithGender });
+    });
 
-  socket.emit("chat-history", { messages: messagesWithGender });
-});
+    socket.on("send-message", async ({ toId, text }) => {
+      if (!currentUserId || !toId || !text.trim()) return;
 
-    // Send new message + emit to both users
-socket.on("send-message", async ({ toId, text }) => {
-  if (!currentUserId || !toId || !text.trim()) return;
+      const convId = getChatId(currentUserId, toId);
+      const senderProfile = data.userProfiles[Object.keys(data.userProfiles).find(k => data.userProfiles[k].id === currentUserId)];
 
-  const convId = getChatId(currentUserId, toId);
-  const senderProfile = data.userProfiles[Object.keys(data.userProfiles).find(k => data.userProfiles[k].id === currentUserId)];
+      const message = {
+        from: currentUserId,
+        to: Number(toId),
+        text: text.trim(),
+        timestamp: new Date().toISOString(),
+        read: false,
+        gender: senderProfile?.gender || null
+      };
 
-  const message = {
-    from: currentUserId,
-    to: Number(toId),
-    text: text.trim(),
-    timestamp: new Date().toISOString(),
-    read: false,
-    gender: senderProfile?.gender || null
-  };
+      if (!data.messages[convId]) data.messages[convId] = [];
+      data.messages[convId].push(message);
+      await saveData();
 
-  if (!data.messages[convId]) data.messages[convId] = [];
-  data.messages[convId].push(message);
-  await saveData();
+      socket.emit("new-message", message);
 
-  // Send to sender (current socket)
-  socket.emit("new-message", message);
+      const receiverProfile = Object.values(data.userProfiles).find(p => p.id === Number(toId));
+      if (receiverProfile) {
+        const receiverSocketId = onlineUsers.get(receiverProfile.username);
+        if (receiverSocketId) {
+          io.to(receiverSocketId).emit("new-message", message);
+        }
+      }
+    });
 
-  // Find and send to receiver
-  const receiverProfile = Object.values(data.userProfiles).find(p => p.id === Number(toId));
-  if (receiverProfile) {
-    const receiverSocketId = onlineUsers.get(receiverProfile.username);
-    if (receiverSocketId) {
-      io.to(receiverSocketId).emit("new-message", message);
-    }
-  }
-});
-
-    // ✅ Added typing indicators — matches your frontend
     socket.on("typing", ({ toId }) => {
       if (!currentUserId || !toId) return;
       const receiver = Object.values(data.userProfiles).find(p => p.id === Number(toId));
