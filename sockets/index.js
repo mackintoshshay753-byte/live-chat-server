@@ -1,5 +1,5 @@
 const bcrypt = require('bcrypt');
-const { data, saveData, getAvatarUrl } = require('../data');
+const { data, saveData } = require('../data');
 const { clean, createProfile } = require('../helpers');
 
 const onlineUsers = new Map();
@@ -254,11 +254,10 @@ function setupSockets(io) {
           data.userProfiles[name].gender = gender;
           data.userProfiles[name].isOnline = false;
           data.userProfiles[name].lastOnline = null;
-          data.userProfiles[name].avatarUrl = getAvatarUrl(id, gender);
         }
 
         saveData();
-        safeCb(cb, { success: true, username: name, id, gender, avatarUrl: getAvatarUrl(id, gender) });
+        safeCb(cb, { success: true, username: name, id, gender });
       } catch (e) {
         console.error("Signup Error:", e);
         safeCb(cb, { message: "Server error" });
@@ -404,8 +403,7 @@ socket.on("send-message", async ({ toId, text }) => {
     text: text.trim(),
     timestamp: new Date().toISOString(),
     read: false,
-    gender: senderProfile?.gender || null,
-    avatarUrl: getAvatarUrl(currentUserId, senderProfile?.gender)
+    gender: senderProfile?.gender || null
   };
 
   if (!data.messages[convId]) data.messages[convId] = [];

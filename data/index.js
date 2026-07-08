@@ -4,7 +4,6 @@ const path = require('path');
 
 const DATA_PATH = path.join(__dirname, 'chat-data.json');
 const TEMP_DATA_PATH = path.join(__dirname, 'chat-data.tmp.json');
-const CUSTOM_AVATARS = require('./custom-avatars');
 
 const DEFAULT_DATA = {
   nextUserId: 1,
@@ -19,12 +18,6 @@ const DEFAULT_DATA = {
   deletedAccounts: {},
   ads: {}
 };
-
-function getAvatarUrl(userId, gender = null) {
-  const id = Number(userId);
-  if (CUSTOM_AVATARS[id]) return CUSTOM_AVATARS[id];
-  return null;
-}
 
 // In-memory data reference
 let data = { ...DEFAULT_DATA };
@@ -115,4 +108,11 @@ function setRoleOnSignup(username, role = "user") {
 }
 
 // Export a getter/setter function for data so other files don't accidentally break the reference
-module.exports = { get data() { return data; }, setData: (newData) => { data = newData; }, loadData, saveData, setRoleOnSignup, ACTUAL_OWNER_USERNAME, getAvatarUrl};
+module.exports = { 
+  get data() { return data; },
+  setData: (newData) => { data = newData; },
+  loadData, 
+  saveData, 
+  setRoleOnSignup, 
+  ACTUAL_OWNER_USERNAME 
+};
