@@ -4,7 +4,6 @@ const router = express.Router();
 let groups = [];
 let nextGroupId = 1;
 
-// CREATE GROUP
 router.post('/create', (req, res) => {
   try {
     const { creatorId, creatorUsername, name, description, icon } = req.body;
@@ -21,7 +20,11 @@ router.post('/create', (req, res) => {
       description: description || "",
       icon: icon || "",
       createdAt: new Date().toISOString(),
-      members: [creatorId],
+      joinable: true,
+      ranks: {
+        owner: [creatorId],
+        members: []
+      },
       membersCount: 1
     };
 
@@ -33,7 +36,6 @@ router.post('/create', (req, res) => {
   }
 });
 
-// GET GROUP
 router.get('/group', (req, res) => {
   try {
     const id = parseInt(req.query.id);
@@ -42,6 +44,45 @@ router.get('/group', (req, res) => {
     return res.json({ success: true, group });
   } catch (err) {
     console.error("Get group error:", err);
+    return res.json({ success: false, error: "Server error" });
+  }
+});
+
+router.post('/join', (req, res) => {
+  try {
+    const { groupId, userId } = req.body;
+    const group = groups.find(g => g.id === parseInt(groupId));
+
+    if (!group) return res.json({ success: false, error: "Group not found" });
+    if (!group.joinable) return res.json({ success: false, error: "This group is not open for joining" });
+    if (group.ranks.owner.includes(userId)) return res.json({ success: false, error: "You are already the owner" });
+    if (group.ranks.members.includes(userId)) return res.json({ success: false, error: "You are already a member" });
+
+    group.ranks.members.push(userId);
+    group.membersCount = group.ranks.owner.length + group.ranks.members.length;
+
+    return res.json({ success: true, message: "Successfully joined the group" });
+  } catch (err) {
+    console.error("Join group error:", err);
+    return res.json({ success: false, error: "Server error" });
+  }
+});
+
+router.post('/leave', (req, res) => {
+  try {
+    const { groupId, userId } = req.body;
+    const group = groups.find(g => g.id === parseInt(groupId));
+
+    if (!group) return res.json({ success: false, error: "Group not found" });
+    if (group.ranks.owner.includes(userId)) return res.json({ success: false, error: "Owner cannot leave — delete the group instead" });
+    if (!group.ranks.members.includes(userId)) return res.json({ success: false, error: "You are not in this group" });
+
+    group.ranks.members = group.ranks.members.filter(memberId => memberId !== userId);
+    group.membersCount = group.ranks.owner.length + group.ranks.members.length;
+
+    return res.json({ success: true, message: "Successfully left the group" });
+  } catch (err) {
+    console.error("Leave group error:", err);
     return res.json({ success: false, error: "Server error" });
   }
 });
