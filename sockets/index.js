@@ -65,10 +65,14 @@ function setupSockets(io) {
     const clientIp = socket.handshake.address || socket.handshake.headers['x-forwarded-for'] || 'unknown';
     let currentUser = null;
     let currentUserId = null;
+    let heartbeatTimer = null;
 
     console.log(`🔌 User connected | IP: ${clientIp}`);
 
-    socket.on("join", (username) => {
+    // --------------------------
+    // Join / Mark Online
+    // --------------------------
+    const markOnline = (username) => {
       try {
         const cleanName = sanitizeUsername(username);
         if (!cleanName) return;
@@ -76,8 +80,9 @@ function setupSockets(io) {
         const profile = data.userProfiles[cleanName];
         if (profile) currentUserId = profile.id;
 
-        for (const [user, id] of onlineUsers.entries()) {
-          if (id === socket.id) onlineUsers.delete(user);
+        // Remove old entries for this user
+        for (const [user, sid] of onlineUsers.entries()) {
+          if (sid === socket.id || user === cleanName) onlineUsers.delete(user);
         }
 
         onlineUsers.set(cleanName, socket.id);
@@ -92,12 +97,44 @@ function setupSockets(io) {
 
         console.log(`👤 ${cleanName} (ID: ${currentUserId}) is online | Total: ${onlineUsers.size}`);
       } catch (err) {
-        console.error('Join error:', err);
+        console.error('markOnline error:', err);
       }
+    };
+
+    socket.on("join", (username) => markOnline(username));
+
+    // --------------------------
+    // ✅ HEARTBEAT — Keep user online while tab is open
+    // --------------------------
+    socket.on("heartbeat", (username) => {
+      if (!username || username !== currentUser) return;
+      // Refresh status every ping
+      const profile = data.userProfiles[username];
+      if (profile && !profile.isOnline) {
+        profile.isOnline = true;
+        profile.lastOnline = new Date().toISOString();
+        saveData();
+        io.emit("user-status", { userId: currentUserId, isOnline: true });
+      }
+      // Keep Map entry fresh
+      onlineUsers.set(username, socket.id);
     });
 
-    socket.on("disconnect", () => {
+    // --------------------------
+    // Disconnect / Mark Offline
+    // --------------------------
+    socket.on("disconnect", (reason) => {
       try {
+        // Clear heartbeat timer
+        if (heartbeatTimer) clearTimeout(heartbeatTimer);
+
+        // Only mark offline if it's a real close, not just idle/ping timeout
+        const isTemporary = reason === "ping timeout" || reason === "transport close" || reason === "transport error";
+        if (isTemporary) {
+          console.log(`⏱️ ${currentUser} temporary disconnect — waiting for reconnect`);
+          return;
+        }
+
         if (currentUser && currentUserId) {
           onlineUsers.delete(currentUser);
           const profile = data.userProfiles[currentUser];
@@ -111,6 +148,16 @@ function setupSockets(io) {
         }
       } catch (err) {
         console.error('Disconnect error:', err);
+      }
+    });
+
+    // --------------------------
+    // Re‑join after auto‑reconnect
+    // --------------------------
+    socket.on("reconnect", () => {
+      if (currentUser) {
+        console.log(`🔁 Reconnected — re‑marking ${currentUser} online`);
+        markOnline(currentUser);
       }
     });
 
