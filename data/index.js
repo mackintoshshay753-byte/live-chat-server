@@ -18,7 +18,6 @@ const DEFAULT_DATA = {
   deletedAccounts: {},
   groups: [],
   nextGroupId: 1,
-  ads: {}
 };
 
 // In-memory data reference
