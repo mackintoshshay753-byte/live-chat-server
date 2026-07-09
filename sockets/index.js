@@ -441,15 +441,16 @@ function setupSockets(io) {
       const convId = getChatId(currentUserId, friendId);
       const history = data.messages[convId] || [];
 
-      const messagesWithGender = history.map(msg => {
-        if (!msg.gender && msg.from) {
-          const sender = Object.values(data.userProfiles).find(p => p.id === msg.from);
-          msg.gender = sender?.gender || null;
-        }
-        return msg;
+      const messagesWithData = history.map(msg => {
+        const sender = Object.values(data.userProfiles).find(p => p.id === msg.from);
+        return {
+          ...msg,
+          username: sender?.username,
+          gender: sender?.gender
+        };
       });
 
-      socket.emit("chat-history", { messages: messagesWithGender });
+      socket.emit("chat-history", { messages: messagesWithData });
     });
 
     socket.on("send-message", async ({ toId, text }) => {
@@ -461,6 +462,7 @@ function setupSockets(io) {
       const message = {
         from: currentUserId,
         to: Number(toId),
+        username: currentUser,
         text: text.trim(),
         timestamp: new Date().toISOString(),
         read: false,
