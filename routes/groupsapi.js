@@ -92,4 +92,11 @@ router.post('/leave', async (req, res) => {
   }
 });
 
+router.get("/user/:userId",(req,res)=>{
+ try{
+  const id=+req.params.userId;
+  res.json({success:true,groups:Object.values(data.groups||{}).filter(g=>g.ranks.owner.includes(id)||g.ranks.members.includes(id)).map(g=>({id:g.id,name:g.name,isOwner:g.ranks.owner.includes(id)}))});
+ }catch(e){res.status(500).json({success:false,error:"Server error"})}
+});
+
 module.exports = router;
