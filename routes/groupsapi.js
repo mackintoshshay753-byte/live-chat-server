@@ -26,6 +26,7 @@ router.post('/create', async (req, res) => {
       membersCount: 1
     };
 
+    if (!Array.isArray(data.groups)) data.groups = [];
     data.groups.push(newGroup);
     await saveData();
 
@@ -38,12 +39,21 @@ router.post('/create', async (req, res) => {
 
 router.get('/group', (req, res) => {
   try {
-    const id = parseInt(req.query.id);
+    const id = req.query.id ? parseInt(req.query.id) : null;
+
+    // If no ID is given, return all groups
+    if (id === null) {
+      return res.json({ success: true, groups: data.groups || [] });
+    }
+
+    // If ID is given, return single group
     if (isNaN(id)) {
       return res.json({ success: false, error: "Invalid group ID" });
     }
-    const group = data.groups.find(g => g.id === id);
+
+    const group = Array.isArray(data.groups) ? data.groups.find(g => g.id === id) : null;
     if (!group) return res.json({ success: false, error: "Group not found" });
+
     return res.json({ success: true, group });
   } catch (err) {
     console.error("Get group error:", err);
@@ -54,7 +64,7 @@ router.get('/group', (req, res) => {
 router.post('/join', async (req, res) => {
   try {
     const { groupId, userId } = req.body;
-    const group = data.groups.find(g => g.id === parseInt(groupId));
+    const group = Array.isArray(data.groups) ? data.groups.find(g => g.id === parseInt(groupId)) : null;
 
     if (!group) return res.json({ success: false, error: "Group not found" });
     if (!group.joinable) return res.json({ success: false, error: "This group is not open for joining" });
@@ -75,7 +85,7 @@ router.post('/join', async (req, res) => {
 router.post('/leave', async (req, res) => {
   try {
     const { groupId, userId } = req.body;
-    const group = data.groups.find(g => g.id === parseInt(groupId));
+    const group = Array.isArray(data.groups) ? data.groups.find(g => g.id === parseInt(groupId)) : null;
 
     if (!group) return res.json({ success: false, error: "Group not found" });
     if (group.ranks.owner.includes(userId)) return res.json({ success: false, error: "Owner cannot leave — delete the group instead" });
@@ -92,11 +102,29 @@ router.post('/leave', async (req, res) => {
   }
 });
 
-router.get("/user/:userId",(req,res)=>{
- try{
-  const id=+req.params.userId;
-  res.json({success:true,groups:Object.values(data.groups||{}).filter(g=>g.ranks.owner.includes(id)||g.ranks.members.includes(id)).map(g=>({id:g.id,name:g.name,isOwner:g.ranks.owner.includes(id)}))});
- }catch(e){res.status(500).json({success:false,error:"Server error"})}
+// ✅ This is the endpoint your frontend uses — fixed and clear
+router.get("/user/:userId", (req, res) => {
+  try {
+    const userId = Number(req.params.userId);
+    if (isNaN(userId)) {
+      return res.json({ success: false, error: "Invalid user ID" });
+    }
+
+    const userGroups = Array.isArray(data.groups) 
+      ? data.groups
+          .filter(g => g.ranks.owner.includes(userId) || g.ranks.members.includes(userId))
+          .map(g => ({
+            id: g.id,
+            name: g.name,
+            isOwner: g.ranks.owner.includes(userId)
+          }))
+      : [];
+
+    res.json({ success: true, groups: userGroups });
+  } catch (err) {
+    console.error("Get user groups error:", err);
+    res.status(500).json({ success: false, error: "Server error" });
+  }
 });
 
 module.exports = router;
