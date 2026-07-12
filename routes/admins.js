@@ -53,9 +53,7 @@ router.get('/role/:userId', (req, res) => {
 
 router.get('/staff', (req, res) => {
   try {
-    const staff = Object.values(data.accounts)
-      .filter(a => ["owner", "admin", "moderator"].includes(a.role))
-      .map(a => ({ id: a.id, username: getUsername(a), role: a.role }));
+    const staff = Object.values(data.accounts).filter(a => ["owner", "admin", "moderator"].includes(a.role)).map(a => ({ id: a.id, username: getUsername(a), role: a.role }));
     res.json({ success: true, staff });
   } catch (err) {
     res.status(500).json({ success: false, error: "Server error" });
@@ -70,8 +68,7 @@ router.post('/set-role', (req, res) => {
     const actor = resolveTarget(actorId), targetAcc = resolveTarget(target);
     if (!actor || !targetAcc) return res.status(404).json({ success: false, error: "User not found" });
     if (!canInteract(actor, targetAcc)) return res.status(403).json({ success: false, error: "You cannot modify this account" });
-    if (targetAcc.role === "owner" && role !== "owner" && Object.values(data.accounts).filter(a => a.role === "owner").length <= 1)
-      return res.status(403).json({ success: false, error: "Cannot remove the only owner" });
+    if (targetAcc.role === "owner" && role !== "owner" && Object.values(data.accounts).filter(a => a.role === "owner").length <= 1) return res.status(403).json({ success: false, error: "Cannot remove the only owner" });
     const oldRole = targetAcc.role; targetAcc.role = role;
     const profile = Object.values(data.userProfiles).find(p => p.id === targetAcc.id);
     if (profile) profile.role = role;
@@ -147,6 +144,8 @@ router.post('/recover-account', (req, res) => {
     if (!deletedEntry) return res.status(404).json({ success: false, error: "Deleted account not found" });
     const username = Object.keys(data.deletedAccounts).find(k => data.deletedAccounts[k] === deletedEntry);
     if (!username) return res.status(404).json({ success: false, error: "Archive entry not found" });
+    if (!deletedEntry.account.joinDate) deletedEntry.account.joinDate = new Date().toISOString();
+    if (deletedEntry.profile && !deletedEntry.profile.joinDate) deletedEntry.profile.joinDate = new Date().toISOString();
     data.accounts[username] = deletedEntry.account;
     if (deletedEntry.profile) data.userProfiles[username] = deletedEntry.profile;
     if (deletedEntry.registeredName) data.registeredNames[username.toLowerCase()] = deletedEntry.registeredName;
@@ -176,27 +175,27 @@ router.post('/create-account', async (req, res) => {
     if (!actorId || !username || !password) return res.status(400).json({ success: false, error: "Missing fields" });
     const actor = resolveTarget(actorId);
     if (!actor || !isMainOwner(actor)) return res.status(403).json({ success: false, error: "Access denied" });
-    const cleanUsername = username.trim(), lowerUsername = cleanUsername.toLowerCase();
-    if (!/^[a-zA-Z0-9_]{3,20}$/.test(cleanUsername)) return res.status(400).json({ success: false, error: "Invalid username" });
-    if (data.accounts[cleanUsername] || data.deletedAccounts[cleanUsername] || data.registeredNames[lowerUsername])
-      return res.status(409).json({ success: false, error: "Username taken" });
-    if (!(password.length >= 8 && /[a-zA-Z]/.test(password) && /[0-9]/.test(password)))
-      return res.status(400).json({ success: false, error: "Weak password" });
+    const clean = username.trim(), lower = clean.toLowerCase();
+    if (!/^[a-zA-Z0-9_]{3,20}$/.test(clean)) return res.status(400).json({ success: false, error: "Invalid username" });
+    if (data.accounts[clean] || data.deletedAccounts[clean] || data.registeredNames[lower]) return res.status(409).json({ success: false, error: "Username taken" });
+    if (!(password.length >= 8 && /[a-zA-Z]/.test(password) && /[0-9]/.test(password))) return res.status(400).json({ success: false, error: "Weak password" });
     const finalRole = ["user", "moderator", "admin", "owner"].includes(role) ? role : "user";
     let newId = data.nextUserId;
     while (Object.values(data.accounts).some(a => a.id === newId) || Object.values(data.deletedAccounts).some(d => d.account.id === newId)) newId++;
     data.nextUserId = newId + 1;
+    const joinDate = new Date().toISOString();
     const hash = await bcrypt.hash(password, 12);
-    const newAccount = { id: newId, hash, role: finalRole, banned: false, banReason: "", banUntil: null, joinDate: new Date().toISOString(), theme: "light", verified: false };
-    const newProfile = { id: newId, username: cleanUsername, role: finalRole, isOnline: false, lastOnline: null, createdAt: new Date().toISOString() };
-    data.accounts[cleanUsername] = newAccount;
-    data.userProfiles[cleanUsername] = newProfile;
-    data.registeredNames[lowerUsername] = cleanUsername;
-    data.usernameToId[cleanUsername] = newId;
-    data.moderationLogs.push({ type: "CREATE_ACCOUNT", actorId, actorName: getUsername(actor), targetId: newId, targetName: cleanUsername, role: finalRole, timestamp: new Date().toISOString() });
+    const newAccount = { id: newId, hash, role: finalRole, banned: false, banReason: "", banUntil: null, joinDate, theme: "light", verified: false };
+    const newProfile = { id: newId, username: clean, role: finalRole, joinDate, isOnline: false, lastOnline: null, createdAt: joinDate };
+    data.accounts[clean] = newAccount;
+    data.userProfiles[clean] = newProfile;
+    data.registeredNames[lower] = clean;
+    data.usernameToId[clean] = newId;
+    data.moderationLogs.push({ type: "CREATE_ACCOUNT", actorId, actorName: getUsername(actor), targetId: newId, targetName: clean, role: finalRole, timestamp: joinDate });
     await saveData();
-    res.json({ success: true, accountId: newId, username: cleanUsername, role: finalRole });
-  } catch {
+    res.json({ success: true, accountId: newId, username: clean, role: finalRole });
+  } catch (err) {
+    console.error("Create account error:", err);
     res.status(500).json({ success: false, error: "Server error" });
   }
 });
