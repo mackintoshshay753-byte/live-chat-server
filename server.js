@@ -98,12 +98,12 @@ require("./sockets")(io);
 app.use("/api", require("./routes/api"));
 app.use("/api/friends", require("./routes/friendsapi"));
 app.use("/api/messages", require("./routes/messagesapi"));
-app.use("/api/catalog", require("./routes/catalogapi"));
-app.use("/api/outfits", require("./routes/outfitsapi"));
 app.use("/api/advert", require("./routes/advertapi"));
 app.use("/api/admin", require("./routes/admins"));
 app.use("/api/chat", require("./routes/chat"));
 app.use("/api/groups", require("./routes/groupsapi"));
+app.use("/api/outfits", require("./routes/outfitsapi"));
+app.use("/api/catalog", require("./routes/catalogapi"));
 app.use("/", require("./routes/pages"));
 
 // ---------------- 404 ----------------
