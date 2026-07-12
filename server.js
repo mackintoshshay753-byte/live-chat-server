@@ -98,6 +98,7 @@ require("./sockets")(io);
 app.use("/api", require("./routes/api"));
 app.use("/api/friends", require("./routes/friendsapi"));
 app.use("/api/messages", require("./routes/messagesapi"));
+app.use("/api/catalog", require("./routes/catalogapi"));
 app.use("/api/advert", require("./routes/advertapi"));
 app.use("/api/admin", require("./routes/admins"));
 app.use("/api/chat", require("./routes/chat"));
