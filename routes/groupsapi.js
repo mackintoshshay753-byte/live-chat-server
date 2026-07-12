@@ -116,6 +116,7 @@ router.get("/user/:userId", (req, res) => {
           .map(g => ({
             id: g.id,
             name: g.name,
+            icon: g.icon || "",
             isOwner: g.ranks.owner.includes(userId)
           }))
       : [];
