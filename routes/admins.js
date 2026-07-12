@@ -46,7 +46,12 @@ router.get('/role/:userId', (req, res) => {
 
 router.get('/staff', (req, res) => {
   try {
-    const staff = Object.values(data.accounts).filter(a => ["owner", "admin", "moderator"].includes(a.role)).map(a => ({ id: a.id, username: getUsername(a), role: a.role }));
+    const staff = Object.values(data.accounts).filter(a => ["owner", "admin", "moderator"].includes(a.role)).map(a => ({ 
+      id: a.id, 
+      username: getUsername(a), 
+      role: a.role,
+      banned: a.banned || false
+    }));
     res.json({ success: true, staff });
   } catch (err) {
     res.status(500).json({ success: false, error: "Server error" });
@@ -118,8 +123,18 @@ router.post('/delete-account', (req, res) => {
     if (!actor || !targetAcc) return res.status(404).json({ success: false, error: "Account not found" });
     if (!canInteract(actor, targetAcc)) return res.status(403).json({ success: false, error: "You cannot delete this account" });
     const username = getUsername(targetAcc);
-    data.deletedAccounts[username] = { account: { ...targetAcc }, profile: { ...data.userProfiles[username] || {} }, registeredName: data.registeredNames[username.toLowerCase()] || null, idMap: data.usernameToId[username] || null, deletedAt: new Date().toISOString(), deletedBy: getUsername(actor) };
-    delete data.accounts[username]; delete data.userProfiles[username]; delete data.registeredNames[username.toLowerCase()]; delete data.usernameToId[username];
+    data.deletedAccounts[username] = { 
+      account: { ...targetAcc }, 
+      profile: { ...data.userProfiles[username] || {} }, 
+      registeredName: data.registeredNames[username.toLowerCase()] || null, 
+      idMap: data.usernameToId[username] || null, 
+      deletedAt: new Date().toISOString(), 
+      deletedBy: getUsername(actor) 
+    };
+    delete data.accounts[username]; 
+    delete data.userProfiles[username]; 
+    delete data.registeredNames[username.toLowerCase()]; 
+    delete data.usernameToId[username];
     data.moderationLogs.push({ type: "DELETE_ACCOUNT", actorId, actorName: getUsername(actor), targetId: targetAcc.id, targetName: username, timestamp: new Date().toISOString() });
     saveData();
     res.json({ success: true, message: "Account deleted and archived" });
@@ -142,7 +157,7 @@ router.post('/recover-account', (req, res) => {
     if (deletedEntry.profile) {
       deletedEntry.profile.joinDate = deletedEntry.profile.joinDate || new Date().toISOString();
       deletedEntry.profile.gender = deletedEntry.profile.gender || "";
-      deletedEntry.profile.birthday = deletedEntry.profile.birthday || "";
+      deletedEntry.profile.birthday = deletedEntry.profile.birthday || null;
     }
     data.accounts[username] = deletedEntry.account;
     if (deletedEntry.profile) data.userProfiles[username] = deletedEntry.profile;
@@ -167,29 +182,85 @@ router.get('/logs', (req, res) => {
   }
 });
 
+// ✅ FIXED CREATE ACCOUNT ROUTE
 router.post('/create-account', async (req, res) => {
   try {
     const { actorId, username, password, role = "user", gender = "", birthday = "" } = req.body;
-    if (!actorId || !username || !password) return res.status(400).json({ success: false, error: "Missing fields" });
+    if (!actorId || !username || !password || !gender || !birthday) 
+      return res.status(400).json({ success: false, error: "All fields are required" });
+
     const actor = resolveTarget(actorId);
-    if (!actor || !isMainOwner(actor)) return res.status(403).json({ success: false, error: "Access denied" });
+    if (!actor || !isMainOwner(actor)) 
+      return res.status(403).json({ success: false, error: "Access denied" });
+
     const clean = username.trim(), lower = clean.toLowerCase();
-    if (!/^[a-zA-Z0-9_]{3,20}$/.test(clean)) return res.status(400).json({ success: false, error: "Invalid username" });
-    if (data.accounts[clean] || data.deletedAccounts[clean] || data.registeredNames[lower]) return res.status(409).json({ success: false, error: "Username taken" });
-    if (!(password.length >= 8 && /[a-zA-Z]/.test(password) && /[0-9]/.test(password))) return res.status(400).json({ success: false, error: "Weak password" });
+    if (!/^[a-zA-Z0-9_]{3,20}$/.test(clean)) 
+      return res.status(400).json({ success: false, error: "Invalid username" });
+
+    if (data.accounts[clean] || data.deletedAccounts[clean] || data.registeredNames[lower]) 
+      return res.status(409).json({ success: false, error: "Username taken" });
+
+    if (!(password.length >= 8 && /[a-zA-Z]/.test(password) && /[0-9]/.test(password))) 
+      return res.status(400).json({ success: false, error: "Weak password" });
+
     const finalRole = ["user", "moderator", "admin", "owner"].includes(role) ? role : "user";
+
     let newId = data.nextUserId;
     while (Object.values(data.accounts).some(a => a.id === newId) || Object.values(data.deletedAccounts).some(d => d.account.id === newId)) newId++;
     data.nextUserId = newId + 1;
+
     const joinDate = new Date().toISOString();
     const hash = await bcrypt.hash(password, 12);
-    const newAccount = { id: newId, hash, role: finalRole, banned: false, banReason: "", banUntil: null, joinDate, theme: "light", verified: false };
-    const newProfile = { id: newId, username: clean, role: finalRole, joinDate, gender: gender || "", birthday: birthday || "", isOnline: false, lastOnline: null, createdAt: joinDate };
+
+    // ✅ Convert birthday from "YYYY-MM-DD" to your object format
+    const birthdayParts = birthday.split("-");
+    const monthNames = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+    const birthdayObj = {
+      month: monthNames[parseInt(birthdayParts[1]) - 1],
+      day: parseInt(birthdayParts[2]),
+      year: parseInt(birthdayParts[0])
+    };
+
+    const newAccount = { 
+      id: newId, 
+      hash, 
+      role: finalRole, 
+      banned: false, 
+      banReason: "", 
+      banUntil: null, 
+      joinDate, 
+      theme: "light", 
+      verified: false 
+    };
+
+    // ✅ Matches your existing profile structure
+    const newProfile = { 
+      id: newId, 
+      username: clean, 
+      role: finalRole, 
+      joinDate, 
+      gender: gender.charAt(0).toUpperCase() + gender.slice(1), // "male" → "Male"
+      birthday: birthdayObj,
+      isOnline: false, 
+      lastOnline: null, 
+      createdAt: joinDate 
+    };
+
     data.accounts[clean] = newAccount;
     data.userProfiles[clean] = newProfile;
     data.registeredNames[lower] = clean;
     data.usernameToId[clean] = newId;
-    data.moderationLogs.push({ type: "CREATE_ACCOUNT", actorId, actorName: getUsername(actor), targetId: newId, targetName: clean, role: finalRole, timestamp: joinDate });
+
+    data.moderationLogs.push({ 
+      type: "CREATE_ACCOUNT", 
+      actorId, 
+      actorName: getUsername(actor), 
+      targetId: newId, 
+      targetName: clean, 
+      role: finalRole, 
+      timestamp: joinDate 
+    });
+
     await saveData();
     res.json({ success: true, accountId: newId, username: clean, role: finalRole });
   } catch (err) {
