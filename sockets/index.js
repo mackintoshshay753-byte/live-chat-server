@@ -7,9 +7,6 @@ const loginAttempts = new Map();
 const MAX_ATTEMPTS = 5;
 const LOCKOUT_TIME = 15 * 60 * 1000;
 
-// --------------------------
-// Chat helper
-// --------------------------
 function getChatId(userIdA, userIdB) {
   const [x, y] = [Number(userIdA), Number(userIdB)].sort((a, b) => a - b);
   return `chat:${x}:${y}`;
@@ -69,9 +66,6 @@ function setupSockets(io) {
 
     console.log(`🔌 User connected | IP: ${clientIp}`);
 
-    // --------------------------
-    // Mark user online
-    // --------------------------
     const markOnline = (username) => {
       try {
         const cleanName = sanitizeUsername(username);
@@ -80,7 +74,6 @@ function setupSockets(io) {
         const profile = data.userProfiles[cleanName];
         if (profile) currentUserId = profile.id;
 
-        // Remove old entries for this user
         for (const [user, sid] of onlineUsers.entries()) {
           if (sid === socket.id || user === cleanName) onlineUsers.delete(user);
         }
@@ -103,9 +96,6 @@ function setupSockets(io) {
 
     socket.on("join", (username) => markOnline(username));
 
-    // --------------------------
-    // Heartbeat — keep online while active
-    // --------------------------
     socket.on("heartbeat", (username) => {
       if (!username || username !== currentUser) return;
       const profile = data.userProfiles[username];
@@ -116,21 +106,13 @@ function setupSockets(io) {
       }
     });
 
-    // --------------------------
-    // ✅ FIXED DISCONNECT LOGIC
-    // --------------------------
     socket.on("disconnect", (reason) => {
       try {
-        // Stop heartbeat
         if (heartbeatInterval) clearInterval(heartbeatInterval);
-
-        // ✅ Only treat as temporary if it's a ping timeout
-        // All other reasons = actual disconnect / tab closed
         const isTemporary = reason === "ping timeout";
 
         if (isTemporary && currentUser) {
           console.log(`⏱️ ${currentUser} ping timeout — waiting up to 15s for reconnect`);
-          // Give 15s to reconnect before marking offline
           setTimeout(() => {
             if (socket.connected || !currentUser) return;
             if (onlineUsers.get(currentUser) !== socket.id) return;
@@ -148,7 +130,6 @@ function setupSockets(io) {
           return;
         }
 
-        // ✅ Mark offline immediately for real disconnects
         if (currentUser && currentUserId) {
           onlineUsers.delete(currentUser);
           const profile = data.userProfiles[currentUser];
@@ -160,15 +141,11 @@ function setupSockets(io) {
           }
           console.log(`👤 ${currentUser} went offline | Reason: ${reason} | Total: ${onlineUsers.size}`);
         }
-
       } catch (err) {
         console.error('Disconnect error:', err);
       }
     });
 
-    // --------------------------
-    // Reconnect handling
-    // --------------------------
     socket.on("reconnect", () => {
       if (currentUser) {
         console.log(`🔁 Reconnected — re‑marking ${currentUser} online`);
@@ -176,9 +153,6 @@ function setupSockets(io) {
       }
     });
 
-    // --------------------------
-    // Rest of your events — NO CHANGES NEEDED
-    // --------------------------
     socket.on("login", async ({ username, password }, cb) => {
       try {
         const name = sanitizeUsername(username);
@@ -433,9 +407,6 @@ function setupSockets(io) {
       }
     });
 
-    // --------------------------
-    // Chat functions
-    // --------------------------
     socket.on("load-messages", async ({ friendId }) => {
       if (!currentUserId || !friendId) return;
       const convId = getChatId(currentUserId, friendId);
@@ -445,8 +416,8 @@ function setupSockets(io) {
         const sender = Object.values(data.userProfiles).find(p => p.id === msg.from);
         return {
           ...msg,
-          username: sender?.username,
-          gender: sender?.gender
+          username: sender?.username || "Unknown",
+          gender: sender?.gender || "Other"
         };
       });
 
@@ -457,7 +428,7 @@ function setupSockets(io) {
       if (!currentUserId || !toId || !text.trim()) return;
 
       const convId = getChatId(currentUserId, toId);
-      const senderProfile = data.userProfiles[Object.keys(data.userProfiles).find(k => data.userProfiles[k].id === currentUserId)];
+      const senderProfile = Object.values(data.userProfiles).find(p => p.id === currentUserId);
 
       const message = {
         from: currentUserId,
@@ -476,14 +447,12 @@ function setupSockets(io) {
       socket.emit("new-message", message);
 
       const receiverProfile = Object.values(data.userProfiles).find(p => p.id === Number(toId));
-      if (receiverProfile) {
-        const receiverSocketId = onlineUsers.get(receiverProfile.username);
-        if (receiverSocketId) {
-          io.to(receiverSocketId).emit("new-message", message);
-        }
+      if (receiverProfile && onlineUsers.has(receiverProfile.username)) {
+        io.to(onlineUsers.get(receiverProfile.username)).emit("new-message", message);
       }
     });
 
+    // ✅ Fixed typing events
     socket.on("typing", ({ toId }) => {
       if (!currentUserId || !toId) return;
       const receiver = Object.values(data.userProfiles).find(p => p.id === Number(toId));
