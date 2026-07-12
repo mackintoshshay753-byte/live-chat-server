@@ -9,38 +9,31 @@ if (!data.deletedAccounts) data.deletedAccounts = {};
 const ACTUAL_OWNER_USERNAME = "sadieandshay87";
 const RANKS = { user: 0, moderator: 1, admin: 2, owner: 3 };
 
-function resolveTarget(input) {
+const resolveTarget = input => {
   if (!input) return null;
   const numId = Number(input);
   return !isNaN(numId) ? Object.values(data.accounts).find(a => a.id === numId) || null : data.accounts[String(input)] || null;
-}
+};
 
-function resolveDeletedTarget(input) {
+const resolveDeletedTarget = input => {
   if (!input) return null;
   const numId = Number(input);
   return !isNaN(numId) ? Object.values(data.deletedAccounts).find(e => e.account.id === numId) || null : data.deletedAccounts[String(input).trim()] || null;
-}
+};
 
-function getUsername(account) {
-  return Object.keys(data.accounts).find(k => data.accounts[k] === account) || null;
-}
-
-function isSelf(actorId, targetAcc) {
-  return Number(actorId) === Number(targetAcc.id);
-}
-
-function isMainOwner(user) {
+const getUsername = account => Object.keys(data.accounts).find(k => data.accounts[k] === account) || null;
+const isSelf = (actorId, targetAcc) => Number(actorId) === Number(targetAcc.id);
+const isMainOwner = user => {
   const un = typeof user === "string" ? user : getUsername(user);
   return un?.toLowerCase() === ACTUAL_OWNER_USERNAME.toLowerCase();
-}
-
-function canInteract(actor, targetAcc) {
+};
+const canInteract = (actor, targetAcc) => {
   if (!actor || !targetAcc) return false;
   if (isSelf(actor.id, targetAcc)) return false;
   if (isMainOwner(targetAcc)) return false;
   if (isMainOwner(actor)) return true;
   return RANKS[actor.role] > RANKS[targetAcc.role];
-}
+};
 
 router.get('/role/:userId', (req, res) => {
   try {
@@ -68,7 +61,8 @@ router.post('/set-role', (req, res) => {
     const actor = resolveTarget(actorId), targetAcc = resolveTarget(target);
     if (!actor || !targetAcc) return res.status(404).json({ success: false, error: "User not found" });
     if (!canInteract(actor, targetAcc)) return res.status(403).json({ success: false, error: "You cannot modify this account" });
-    if (targetAcc.role === "owner" && role !== "owner" && Object.values(data.accounts).filter(a => a.role === "owner").length <= 1) return res.status(403).json({ success: false, error: "Cannot remove the only owner" });
+    if (targetAcc.role === "owner" && role !== "owner" && Object.values(data.accounts).filter(a => a.role === "owner").length <= 1)
+      return res.status(403).json({ success: false, error: "Cannot remove the only owner" });
     const oldRole = targetAcc.role; targetAcc.role = role;
     const profile = Object.values(data.userProfiles).find(p => p.id === targetAcc.id);
     if (profile) profile.role = role;
@@ -146,9 +140,9 @@ router.post('/recover-account', (req, res) => {
     if (!username) return res.status(404).json({ success: false, error: "Archive entry not found" });
     if (!deletedEntry.account.joinDate) deletedEntry.account.joinDate = new Date().toISOString();
     if (deletedEntry.profile) {
-      if (!deletedEntry.profile.joinDate) deletedEntry.profile.joinDate = new Date().toISOString();
-      if (!deletedEntry.profile.gender) deletedEntry.profile.gender = "";
-      if (!deletedEntry.profile.birthday) deletedEntry.profile.birthday = "";
+      deletedEntry.profile.joinDate = deletedEntry.profile.joinDate || new Date().toISOString();
+      deletedEntry.profile.gender = deletedEntry.profile.gender || "";
+      deletedEntry.profile.birthday = deletedEntry.profile.birthday || "";
     }
     data.accounts[username] = deletedEntry.account;
     if (deletedEntry.profile) data.userProfiles[username] = deletedEntry.profile;
@@ -190,7 +184,7 @@ router.post('/create-account', async (req, res) => {
     const joinDate = new Date().toISOString();
     const hash = await bcrypt.hash(password, 12);
     const newAccount = { id: newId, hash, role: finalRole, banned: false, banReason: "", banUntil: null, joinDate, theme: "light", verified: false };
-    const newProfile = { id: newId, username: clean, role: finalRole, joinDate, gender, birthday, isOnline: false, lastOnline: null, createdAt: joinDate };
+    const newProfile = { id: newId, username: clean, role: finalRole, joinDate, gender: gender || "", birthday: birthday || "", isOnline: false, lastOnline: null, createdAt: joinDate };
     data.accounts[clean] = newAccount;
     data.userProfiles[clean] = newProfile;
     data.registeredNames[lower] = clean;
