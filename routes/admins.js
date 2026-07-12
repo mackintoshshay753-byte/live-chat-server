@@ -145,7 +145,11 @@ router.post('/recover-account', (req, res) => {
     const username = Object.keys(data.deletedAccounts).find(k => data.deletedAccounts[k] === deletedEntry);
     if (!username) return res.status(404).json({ success: false, error: "Archive entry not found" });
     if (!deletedEntry.account.joinDate) deletedEntry.account.joinDate = new Date().toISOString();
-    if (deletedEntry.profile && !deletedEntry.profile.joinDate) deletedEntry.profile.joinDate = new Date().toISOString();
+    if (deletedEntry.profile) {
+      if (!deletedEntry.profile.joinDate) deletedEntry.profile.joinDate = new Date().toISOString();
+      if (!deletedEntry.profile.gender) deletedEntry.profile.gender = "";
+      if (!deletedEntry.profile.birthday) deletedEntry.profile.birthday = "";
+    }
     data.accounts[username] = deletedEntry.account;
     if (deletedEntry.profile) data.userProfiles[username] = deletedEntry.profile;
     if (deletedEntry.registeredName) data.registeredNames[username.toLowerCase()] = deletedEntry.registeredName;
@@ -171,7 +175,7 @@ router.get('/logs', (req, res) => {
 
 router.post('/create-account', async (req, res) => {
   try {
-    const { actorId, username, password, role = "user" } = req.body;
+    const { actorId, username, password, role = "user", gender = "", birthday = "" } = req.body;
     if (!actorId || !username || !password) return res.status(400).json({ success: false, error: "Missing fields" });
     const actor = resolveTarget(actorId);
     if (!actor || !isMainOwner(actor)) return res.status(403).json({ success: false, error: "Access denied" });
@@ -186,7 +190,7 @@ router.post('/create-account', async (req, res) => {
     const joinDate = new Date().toISOString();
     const hash = await bcrypt.hash(password, 12);
     const newAccount = { id: newId, hash, role: finalRole, banned: false, banReason: "", banUntil: null, joinDate, theme: "light", verified: false };
-    const newProfile = { id: newId, username: clean, role: finalRole, joinDate, isOnline: false, lastOnline: null, createdAt: joinDate };
+    const newProfile = { id: newId, username: clean, role: finalRole, joinDate, gender, birthday, isOnline: false, lastOnline: null, createdAt: joinDate };
     data.accounts[clean] = newAccount;
     data.userProfiles[clean] = newProfile;
     data.registeredNames[lower] = clean;
