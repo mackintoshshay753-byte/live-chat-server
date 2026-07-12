@@ -4,7 +4,6 @@ const { Server } = require("socket.io");
 const cors = require("cors");
 const path = require("path");
 const helmet = require("helmet");
-const rateLimit = require("express-rate-limit");
 
 const app = express();
 const server = http.createServer(app);
@@ -14,6 +13,9 @@ const PORT = process.env.PORT || 3000;
 const ALLOWED_ORIGINS = [
     "https://idontknowww.neocities.org"
 ];
+
+// ---------------- Trust Proxy (REQUIRED for Render — keep this!) ----------------
+app.set("trust proxy", 1);
 
 // ---------------- Security ----------------
 app.use(
@@ -35,26 +37,11 @@ app.use((req, res, next) => {
     res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
     res.setHeader("Access-Control-Allow-Credentials", "true");
 
-    // Remove headers that sometimes cause issues
     res.removeHeader("Cross-Origin-Embedder-Policy");
     res.removeHeader("Cross-Origin-Opener-Policy");
 
     next();
 });
-
-// ---------------- Rate Limit ----------------
-const apiLimiter = rateLimit({
-    windowMs: 15 * 60 * 1000,
-    max: 500,
-    standardHeaders: true,
-    legacyHeaders: false,
-    message: {
-        success: false,
-        error: "Too many requests. Please try again later."
-    }
-});
-
-app.use("/api", apiLimiter);
 
 // ---------------- CORS ----------------
 const corsOptions = {
@@ -75,7 +62,7 @@ app.options(/.*/, cors(corsOptions));
 
 // ---------------- Body Parser ----------------
 app.use(express.json({
-    limit: "5mb" // Allow up to 5MB — more than enough for any group icon
+    limit: "5mb"
 }));
 app.use(express.urlencoded({ limit: "5mb", extended: true }));
 
@@ -95,7 +82,9 @@ const io = new Server(server, {
         origin: ALLOWED_ORIGINS,
         credentials: true
     },
-    transports: ["websocket", "polling"]
+    transports: ["websocket", "polling"],
+    pingInterval: 10000,
+    pingTimeout: 15000
 });
 
 // ---------------- Load Data ----------------
