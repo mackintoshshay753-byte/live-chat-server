@@ -3,20 +3,26 @@ const router = express.Router();
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs').promises;
-const { data, saveData } = require('../chat-data');
+
+// ✅ CHANGE: Use your existing data.js instead of chat-data
+const { data, saveData } = require('../data');
 
 // --------------------------
 // 📂 Save location: next to your data file, NOT in /public
 // --------------------------
-const ROOT_FOLDER = path.join(__dirname, '..'); // Go up one level from /routes
+const ROOT_FOLDER = path.join(__dirname, '..');
 const OUTFITS_FOLDER = path.join(ROOT_FOLDER, 'outfits-images');
 const HEAD_FOLDER = path.join(OUTFITS_FOLDER, 'head');
 const THUMB_FOLDER = path.join(OUTFITS_FOLDER, 'thumbnail');
 
 // Create folders automatically if they don't exist
 (async () => {
-  await fs.mkdir(HEAD_FOLDER, { recursive: true });
-  await fs.mkdir(THUMB_FOLDER, { recursive: true });
+  try {
+    await fs.mkdir(HEAD_FOLDER, { recursive: true });
+    await fs.mkdir(THUMB_FOLDER, { recursive: true });
+  } catch (err) {
+    console.error("Failed to create outfit folders:", err);
+  }
 })();
 
 // --------------------------
@@ -29,6 +35,8 @@ const storage = multer.diskStorage({
   },
   filename: (req, file, cb) => {
     const ext = path.extname(file.originalname).toLowerCase();
+    // Make sure nextOutfitId exists
+    if (!data.nextOutfitId) data.nextOutfitId = 1;
     const outfitId = data.nextOutfitId;
     const type = file.fieldname;
     cb(null, `outfit_${outfitId}_${type}${ext}`);
@@ -53,7 +61,6 @@ const upload = multer({
 // Access control
 // --------------------------
 const ALLOWED_UPLOAD_IDS = [1]; // Only user ID 1 can upload
-const ALLOWED_UPLOAD_ROLES = ["owner", "admin"];
 
 // --------------------------
 // Routes
@@ -61,10 +68,12 @@ const ALLOWED_UPLOAD_ROLES = ["owner", "admin"];
 
 // Get all outfits
 router.get('/', (req, res) => {
-  res.json({ success: true, catalog: data.outfitCatalog || {} });
+  // Initialize structure if missing
+  if (!data.outfitCatalog) data.outfitCatalog = {};
+  res.json({ success: true, catalog: data.outfitCatalog });
 });
 
-// Serve uploaded images directly from this folder
+// Serve uploaded images
 router.use('/images/outfits', express.static(OUTFITS_FOLDER));
 
 // Upload new outfit
@@ -86,12 +95,14 @@ router.post(
         return res.status(400).json({ success: false, message: "Missing name, price, or both images." });
       }
 
+      // Ensure IDs exist
+      if (!data.nextOutfitId) data.nextOutfitId = 1;
+      if (!data.outfitCatalog) data.outfitCatalog = {};
+
       const outfitId = data.nextOutfitId;
-      // Path we will store and use in frontend
       const headPath = `/api/catalog/images/outfits/head/${headFile.filename}`;
       const thumbPath = `/api/catalog/images/outfits/thumbnail/${thumbFile.filename}`;
 
-      // Save to your data file
       data.outfitCatalog[outfitId] = {
         id: outfitId,
         name: name.trim(),
