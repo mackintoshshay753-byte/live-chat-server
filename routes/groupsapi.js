@@ -118,6 +118,7 @@ router.get("/user/:userId", (req, res) => {
             icon: g.icon || "",
             description: g.description || "",
             membersCount: g.membersCount || 1,
+            rank: g.ranks.owner.includes(userId) ? "Owner" : "Member",
             isOwner: g.ranks.owner.includes(userId)
           }))
       : [];
