@@ -130,6 +130,36 @@ router.get("/user/:userId", (req, res) => {
   }
 });
 
+router.post('/shout', async (req, res) => {
+  try {
+    const { groupId, userId, username, message } = req.body;
+    if (!groupId || !userId || !username || !message)
+      return res.json({ success: false, error: "Missing fields" });
+
+    const group = data.groups?.find(g => g.id === +groupId);
+    if (!group) return res.json({ success: false, error: "Group not found" });
+    if (!group.ranks.owner.includes(+userId))
+      return res.json({ success: false, error: "Only owner can shout" });
+
+    group.shout = { body: message.trim(), posterId: userId, posterName: username, updated: new Date().toISOString() };
+    await saveData();
+    res.json({ success: true, shout: group.shout });
+  } catch (err) {
+    console.error("Post shout:", err);
+    res.json({ success: false, error: "Server error" });
+  }
+});
+
+router.get('/shout', (req, res) => {
+  try {
+    const group = data.groups?.find(g => g.id === +req.query.id);
+    res.json({ success: !!group, shout: group?.shout || null, error: group ? undefined : "Group not found" });
+  } catch (err) {
+    console.error("Get shout:", err);
+    res.json({ success: false, error: "Server error" });
+  }
+});
+
 router.post('/update', async (req, res) => {
   try {
     const { groupId, userId, name, description, icon } = req.body;
