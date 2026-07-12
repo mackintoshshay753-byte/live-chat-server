@@ -4,79 +4,88 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs').promises;
 
-// ✅ CHANGE: Use your existing data.js instead of chat-data
 const { data, saveData } = require('../data');
 
 // --------------------------
-// 📂 Save location: next to your data file, NOT in /public
+// 📂 Image storage setup
 // --------------------------
-const ROOT_FOLDER = path.join(__dirname, '..');
-const OUTFITS_FOLDER = path.join(ROOT_FOLDER, 'outfits-images');
-const HEAD_FOLDER = path.join(OUTFITS_FOLDER, 'head');
-const THUMB_FOLDER = path.join(OUTFITS_FOLDER, 'thumbnail');
+// Use absolute path to avoid issues
+const ROOT = path.resolve(__dirname, '..');
+const OUTFITS_DIR = path.join(ROOT, 'outfits-images');
+const HEAD_DIR = path.join(OUTFITS_DIR, 'head');
+const THUMB_DIR = path.join(OUTFITS_DIR, 'thumbnail');
 
-// Create folders automatically if they don't exist
+// Create folders if missing
 (async () => {
   try {
-    await fs.mkdir(HEAD_FOLDER, { recursive: true });
-    await fs.mkdir(THUMB_FOLDER, { recursive: true });
+    await fs.mkdir(HEAD_DIR, { recursive: true });
+    await fs.mkdir(THUMB_DIR, { recursive: true });
+    console.log('✅ Outfit folders ready');
   } catch (err) {
-    console.error("Failed to create outfit folders:", err);
+    console.error('❌ Failed to create folders:', err);
   }
 })();
 
 // --------------------------
-// File upload setup
+// Multer storage config
 // --------------------------
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    const targetDir = file.fieldname === "head" ? HEAD_FOLDER : THUMB_FOLDER;
-    cb(null, targetDir);
+    const dir = file.fieldname === 'head' ? HEAD_DIR : THUMB_DIR;
+    cb(null, dir);
   },
   filename: (req, file, cb) => {
+    // Get safe extension
     const ext = path.extname(file.originalname).toLowerCase();
-    // Make sure nextOutfitId exists
+    const allowed = ['.png', '.jpg', '.jpeg', '.gif'];
+    if (!allowed.includes(ext)) return cb(new Error('Invalid file type'));
+
+    // Ensure we have an ID
     if (!data.nextOutfitId) data.nextOutfitId = 1;
-    const outfitId = data.nextOutfitId;
+    const id = data.nextOutfitId;
     const type = file.fieldname;
-    cb(null, `outfit_${outfitId}_${type}${ext}`);
+
+    // Clean filename
+    const safeName = `outfit_${id}_${type}${ext}`;
+    cb(null, safeName);
   }
 });
 
+// Multer upload rules
 const upload = multer({
-  storage: storage,
+  storage,
   limits: { fileSize: 5 * 1024 * 1024 }, // 5MB max
   fileFilter: (req, file, cb) => {
-    const allowedTypes = /png|jpg|jpeg|gif/;
-    const ext = path.extname(file.originalname).toLowerCase();
-    if (allowedTypes.test(ext)) {
-      cb(null, true);
-    } else {
-      cb(new Error("Only PNG, JPG, and GIF files are allowed."));
-    }
+    const allowed = /^image\/(png|jpeg|gif)$/;
+    if (allowed.test(file.mimetype)) cb(null, true);
+    else cb(new Error('Only PNG, JPG, GIF allowed'));
   }
 });
 
 // --------------------------
 // Access control
 // --------------------------
-const ALLOWED_UPLOAD_IDS = [1]; // Only user ID 1 can upload
+const ALLOWED_UPLOAD_IDS = [1];
+
+// --------------------------
+// Serve images — THIS IS KEY
+// --------------------------
+// Make sure Express can find and return the files
+router.use('/images/outfits', express.static(OUTFITS_DIR, {
+  setHeaders: (res) => {
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+  }
+}));
 
 // --------------------------
 // Routes
 // --------------------------
-
-// Get all outfits
 router.get('/', (req, res) => {
-  // Initialize structure if missing
   if (!data.outfitCatalog) data.outfitCatalog = {};
   res.json({ success: true, catalog: data.outfitCatalog });
 });
 
-// Serve uploaded images
-router.use('/images/outfits', express.static(OUTFITS_FOLDER));
-
-// Upload new outfit
 router.post(
   '/upload',
   upload.fields([{ name: 'head', maxCount: 1 }, { name: 'thumbnail', maxCount: 1 }]),
@@ -86,29 +95,29 @@ router.post(
       const headFile = req.files?.head?.[0];
       const thumbFile = req.files?.thumbnail?.[0];
 
-      // Check permission
       if (!ALLOWED_UPLOAD_IDS.includes(Number(uploaderId))) {
-        return res.status(403).json({ success: false, message: "You are not allowed to upload outfits." });
+        return res.status(403).json({ success: false, message: 'Not authorized' });
       }
 
       if (!name || !price || !headFile || !thumbFile) {
-        return res.status(400).json({ success: false, message: "Missing name, price, or both images." });
+        return res.status(400).json({ success: false, message: 'Fill all fields and select images' });
       }
 
-      // Ensure IDs exist
       if (!data.nextOutfitId) data.nextOutfitId = 1;
       if (!data.outfitCatalog) data.outfitCatalog = {};
 
       const outfitId = data.nextOutfitId;
-      const headPath = `/api/catalog/images/outfits/head/${headFile.filename}`;
-      const thumbPath = `/api/catalog/images/outfits/thumbnail/${thumbFile.filename}`;
+
+      // ✅ This URL is what your frontend will use — it works directly in <img>
+      const headUrl = `/api/catalog/images/outfits/head/${headFile.filename}`;
+      const thumbUrl = `/api/catalog/images/outfits/thumbnail/${thumbFile.filename}`;
 
       data.outfitCatalog[outfitId] = {
         id: outfitId,
         name: name.trim(),
         price: Number(price),
-        head: headPath,
-        thumbnail: thumbPath,
+        head: headUrl,
+        thumbnail: thumbUrl,
         uploadedBy: Number(uploaderId),
         uploadedAt: new Date().toISOString()
       };
@@ -116,11 +125,11 @@ router.post(
       data.nextOutfitId += 1;
       await saveData();
 
-      res.json({ success: true, message: "Outfit uploaded successfully!", outfitId });
+      res.json({ success: true, message: '✅ Uploaded!', outfitId, headUrl, thumbUrl });
 
     } catch (err) {
-      console.error("Upload error:", err);
-      res.status(500).json({ success: false, message: err.message || "Failed to upload outfit." });
+      console.error('❌ Upload error:', err);
+      res.status(500).json({ success: false, message: err.message || 'Upload failed' });
     }
   }
 );
