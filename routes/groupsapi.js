@@ -130,4 +130,20 @@ router.get("/user/:userId", (req, res) => {
   }
 });
 
+router.post('/update', async (req, res) => {
+  try {
+    const { groupId, userId, name, description, icon } = req.body;
+    const group = data.groups?.find(g => g.id === Number(groupId));
+    if (!group || !name || !group.ranks.owner.includes(Number(userId)))
+      return res.json({ success: false, error: "Invalid request or not authorized" });
+
+    Object.assign(group, { name: name.trim(), description: (description || "").trim(), ...(icon !== undefined && { icon }) });
+    await saveData();
+    return res.json({ success: true, group });
+  } catch (err) {
+    console.error("Update error:", err);
+    res.json({ success: false, error: "Server error" });
+  }
+});
+
 module.exports = router;
