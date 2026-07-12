@@ -102,7 +102,6 @@ router.post('/leave', async (req, res) => {
   }
 });
 
-// ✅ This is the endpoint your frontend uses — fixed and clear
 router.get("/user/:userId", (req, res) => {
   try {
     const userId = Number(req.params.userId);
@@ -117,6 +116,8 @@ router.get("/user/:userId", (req, res) => {
             id: g.id,
             name: g.name,
             icon: g.icon || "",
+            description: g.description || "",
+            membersCount: g.membersCount || 1,
             isOwner: g.ranks.owner.includes(userId)
           }))
       : [];
