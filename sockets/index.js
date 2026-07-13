@@ -322,59 +322,68 @@ function setupSockets(io) {
     });
 
     socket.on("change username", async ({ oldName, newName }, cb) => {
-      try {
-        const cleanOld = sanitizeUsername(oldName);
-        const cleanNew = sanitizeUsername(newName);
+  try {
+    const cleanOld = sanitizeUsername(oldName);
+    const cleanNew = sanitizeUsername(newName);
 
-        if (!cleanOld || !cleanNew || cleanOld === cleanNew) {
-          return safeCb(cb, { message: "Invalid name change request" });
-        }
+    if (!cleanOld || !cleanNew || cleanOld === cleanNew) {
+      return safeCb(cb, { message: "Invalid name change request" });
+    }
 
-        const oldLower = cleanOld.toLowerCase();
-        const newLower = cleanNew.toLowerCase();
+    const oldLower = cleanOld.toLowerCase();
+    const newLower = cleanNew.toLowerCase();
 
-        if (cleanNew.length < 3 || cleanNew.length > 20)
-          return safeCb(cb, { message: "New name must be 3–20 characters" });
-        if (!/^[a-zA-Z0-9_]+$/.test(cleanNew))
-          return safeCb(cb, { message: "Only letters, numbers and underscores allowed" });
-        if (data.registeredNames[newLower])
-          return safeCb(cb, { message: "New username already taken" });
-        if (!data.accounts[cleanOld])
-          return safeCb(cb, { message: "Original account not found" });
+    if (cleanNew.length < 3 || cleanNew.length > 20)
+      return safeCb(cb, { message: "New name must be 3–20 characters" });
+    if (!/^[a-zA-Z0-9_]+$/.test(cleanNew))
+      return safeCb(cb, { message: "Only letters, numbers and underscores allowed" });
+    if (data.registeredNames[newLower])
+      return safeCb(cb, { message: "New username already taken" });
+    if (!data.accounts[cleanOld])
+      return safeCb(cb, { message: "Original account not found" });
 
-        delete data.registeredNames[oldLower];
-        data.registeredNames[newLower] = true;
+    delete data.registeredNames[oldLower];
+    data.registeredNames[newLower] = true;
 
-        const oldAccount = data.accounts[cleanOld];
-        delete data.accounts[cleanOld];
-        data.accounts[cleanNew] = oldAccount;
+    const oldAccount = data.accounts[cleanOld];
+    delete data.accounts[cleanOld];
+    data.accounts[cleanNew] = oldAccount;
 
-        const oldProfile = data.userProfiles[cleanOld];
-        if (oldProfile) {
-          delete data.userProfiles[cleanOld];
-          oldProfile.username = cleanNew;
-          data.userProfiles[cleanNew] = oldProfile;
-        }
+    const oldProfile = data.userProfiles[cleanOld];
+    if (oldProfile) {
+      delete data.userProfiles[cleanOld];
+      oldProfile.username = cleanNew;
+      data.userProfiles[cleanNew] = oldProfile;
+    }
 
-        if (data.usernameToId[cleanOld]) {
-          data.usernameToId[cleanNew] = data.usernameToId[cleanOld];
-          delete data.usernameToId[cleanOld];
-        }
+    if (data.usernameToId[cleanOld]) {
+      data.usernameToId[cleanNew] = data.usernameToId[cleanOld];
+      delete data.usernameToId[cleanOld];
+    }
 
-        if (onlineUsers.has(cleanOld)) {
-          onlineUsers.set(cleanNew, onlineUsers.get(cleanOld));
-          onlineUsers.delete(cleanOld);
-        }
+    if (onlineUsers.has(cleanOld)) {
+      onlineUsers.set(cleanNew, onlineUsers.get(cleanOld));
+      onlineUsers.delete(cleanOld);
+    }
 
-        saveData();
-        io.emit("username updated", { oldName: cleanOld, newName: cleanNew });
-
-        safeCb(cb, { success: true, newName: cleanNew });
-      } catch (err) {
-        console.error("Change Username Error:", err);
-        safeCb(cb, { message: "Failed to change username — please try again" });
-      }
+    // ✅ NEW: Save to past usernames history
+    data.usernameHistory.unshift({
+      userId: oldAccount.id,
+      oldUsername: cleanOld,
+      newUsername: cleanNew,
+      changedAt: new Date().toISOString()
     });
+    // ✅ END NEW
+
+    saveData();
+    io.emit("username updated", { oldName: cleanOld, newName: cleanNew });
+
+    safeCb(cb, { success: true, newName: cleanNew });
+  } catch (err) {
+    console.error("Change Username Error:", err);
+    safeCb(cb, { message: "Failed to change username — please try again" });
+  }
+});
 
     socket.on("change password", async ({ username, newPassword, currentPassword }, cb) => {
       try {

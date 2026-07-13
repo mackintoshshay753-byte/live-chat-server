@@ -190,4 +190,20 @@ router.get("/search/users", (req, res) => {
   }
 });
 
+router.get("/profile/username-history/:userId", (req, res) => {
+  try {
+    const targetId = Number(req.params.userId);
+    if (!targetId) return res.status(400).json({ success: false });
+
+    // Filter history for this user, newest first
+    const userHistory = (data.usernameHistory || [])
+      .filter(entry => entry.userId === targetId);
+
+    res.json({ success: true, history: userHistory });
+  } catch (err) {
+    console.error("Load username history error:", err);
+    res.status(500).json({ success: false, message: "Failed to load history" });
+  }
+});
+
 module.exports = router;

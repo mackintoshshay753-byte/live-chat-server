@@ -13,6 +13,7 @@ const DEFAULT_DATA = {
   usernameToId: {},
   friendRequests: {},
   friends: {},
+  usernameHistory: [],
   messages: {},
   moderationLogs: [],
   deletedAccounts: {},
