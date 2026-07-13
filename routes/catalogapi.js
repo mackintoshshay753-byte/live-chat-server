@@ -4,35 +4,41 @@ const { data, saveData } = require('../data');
 
 const ALLOWED_UPLOAD_IDS = [1];
 
-// Ensure base structure exists
 if (!data.outfitCatalog) data.outfitCatalog = {};
 if (!data.nextOutfitId || typeof data.nextOutfitId !== 'number') data.nextOutfitId = 1;
 if (!data.users) data.users = {};
 
-/**
- * Get single outfit by ID
- * GET /outfits/:id
- */
+function findUserById(userId) {
+  if (!userId) return null;
+  
+  if (data.users[userId]) return data.users[userId];
+  if (data.users[String(userId)]) return data.users[String(userId)];
+  
+  const foundUser = Object.values(data.users).find(u => Number(u.id) === Number(userId));
+  return foundUser || null;
+}
 
-router.get('/recommended',(req,res)=>{
-  const limit=Math.max(1,parseInt(req.query.limit)||12);
+router.get('/recommended', (req, res) => {
+  const limit = Math.max(1, parseInt(req.query.limit) || 12);
 
-  const outfits=Object.values(data.outfitCatalog)
-    .map(o=>{
-      const u=data.users[o.uploadedBy]||{};
+  const outfits = Object.values(data.outfitCatalog)
+    .map(o => {
+      const u = findUserById(o.uploadedBy) || {};
+      
       return {
         ...o,
-        creatorName:u.username||`User ${o.uploadedBy||0}`,
-        creatorUrl:`/users/profile?id=${o.uploadedBy||0}`,
-        sales:o.sales||0,
-        views:o.views||0,
-        score:(o.sales||0)*2+(o.views||0)
+        creatorId: o.uploadedBy || 0,
+        creatorName: u.username || `User ${o.uploadedBy || 0}`,
+        creatorUrl: `/users/profile?id=${o.uploadedBy || 0}`,
+        sales: o.sales || 0,
+        views: o.views || 0,
+        score: (o.sales || 0) * 2 + (o.views || 0)
       };
     })
-    .sort((a,b)=>b.score-a.score||b.sales-a.sales||b.views-a.views)
-    .slice(0,limit);
+    .sort((a, b) => b.score - a.score || b.sales - a.sales || b.views - a.views)
+    .slice(0, limit);
 
-  res.json({success:true,count:outfits.length,outfits});
+  res.json({ success: true, count: outfits.length, outfits });
 });
 
 router.get('/:id', (req, res) => {
@@ -49,8 +55,9 @@ router.get('/:id', (req, res) => {
 
   outfit.views = (outfit.views || 0) + 1;
   saveData().catch(console.error);
+  
   const uploadedBy = outfit.uploadedBy ?? 0;
-  const creator = data.users[uploadedBy] || { username: `User ${uploadedBy}` };
+  const creator = findUserById(uploadedBy) || { username: `User ${uploadedBy}` };
 
   res.json({
     success: true,
@@ -70,20 +77,11 @@ router.get('/:id', (req, res) => {
   });
 });
 
-/**
- * Get all outfits
- * GET /outfits
- */
 router.get('/', (req, res) => {
-  // Optional: Convert object to array for easier frontend use
   const catalogArray = Object.values(data.outfitCatalog);
   res.json({ success: true, count: catalogArray.length, catalog: catalogArray });
 });
 
-/**
- * Upload new outfit
- * POST /outfits/upload
- */
 router.post('/upload', express.json({ limit: '10mb' }), async (req, res) => {
   try {
     const { name, price, head, thumbnail, uploaderId } = req.body;
@@ -93,12 +91,10 @@ router.post('/upload', express.json({ limit: '10mb' }), async (req, res) => {
       return res.status(403).json({ success: false, message: "Not authorized to upload outfits" });
     }
 
-    // Validate required fields
     if (!name?.trim() || !head || !thumbnail) {
       return res.status(400).json({ success: false, message: "Fields: name, price, head, thumbnail are required" });
     }
 
-    // Validate price
     const numericPrice = Number(price);
     if (isNaN(numericPrice) || numericPrice < 0) {
       return res.status(400).json({ success: false, message: "Price must be a non-negative number" });
@@ -133,10 +129,6 @@ router.post('/upload', express.json({ limit: '10mb' }), async (req, res) => {
   }
 });
 
-/**
- * Optional: Update existing outfit
- * PUT /outfits/:id
- */
 router.put('/:id', express.json({ limit: '10mb' }), async (req, res) => {
   try {
     const outfitId = parseInt(req.params.id, 10);
@@ -163,10 +155,6 @@ router.put('/:id', express.json({ limit: '10mb' }), async (req, res) => {
   }
 });
 
-/**
- * Optional: Delete outfit
- * DELETE /outfits/:id
- */
 router.delete('/:id', async (req, res) => {
   try {
     const outfitId = parseInt(req.params.id, 10);
