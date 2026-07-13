@@ -57,6 +57,34 @@ function safeCb(cb, response = {}) {
   }
 }
 
+// --- PERMANENT DEFAULT OUTFIT ASSIGNMENT ---
+async function assignPermanentDefaultOutfit(userId, gender) {
+  userId = Number(userId);
+  if (!userId) return;
+
+  // Pick random matching variant
+  const variantIds = gender === "Female" ? [3, 4] : [1, 2];
+  const chosenOutfitId = variantIds[Math.floor(Math.random() * variantIds.length)];
+
+  // Initialize user outfit data if missing
+  if (!data.userOutfits[userId]) {
+    data.userOutfits[userId] = { equipped: null, owned: [] };
+  }
+
+  // ONLY assign if no outfit is equipped — NEVER overwrite later
+  if (!data.userOutfits[userId].equipped) {
+    // Add to owned list if not already there
+    if (!data.userOutfits[userId].owned.includes(chosenOutfitId)) {
+      data.userOutfits[userId].owned.push(chosenOutfitId);
+      data.outfitCatalog[chosenOutfitId].sales = (data.outfitCatalog[chosenOutfitId].sales || 0) + 1;
+    }
+    // Lock this as their permanent default
+    data.userOutfits[userId].equipped = chosenOutfitId;
+    await saveData();
+    console.log(`✅ Assigned permanent outfit ${chosenOutfitId} to user ${userId} (${gender})`);
+  }
+}
+
 function setupSockets(io) {
   io.on("connection", (socket) => {
     const clientIp = socket.handshake.address || socket.handshake.headers['x-forwarded-for'] || 'unknown';
@@ -281,7 +309,7 @@ function setupSockets(io) {
 
         const id = r.user.id;
         data.registeredNames[lower] = true;
-
+        await assignPermanentDefaultOutfit(id, gender);
         if (data.accounts[name]) {
           data.accounts[name].joinDate = new Date().toISOString();
           data.accounts[name].theme = "light";

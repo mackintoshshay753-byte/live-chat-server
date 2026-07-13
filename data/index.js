@@ -20,8 +20,57 @@ const DEFAULT_DATA = {
   groups: [],
   nextGroupId: 1,
   ads: {},
-  nextOutfitId: 1,
-  outfitCatalog: {},
+  nextOutfitId: 5, // Keep IDs starting after these 4
+  outfitCatalog: {
+    // Male Variant 1
+    1: {
+      id: 1,
+      name: "Default Male",
+      price: 0, // Free
+      head: "/images/avatars/head/male.png",
+      thumbnail: "/images/avatars/thumbnail/male.png",
+      uploadedBy: 1, // Matches your owner user ID
+      uploadedAt: new Date().toISOString(),
+      sales: 0,
+      views: 0
+    },
+    // Male Variant 2
+    2: {
+      id: 2,
+      name: "Default Male Alt",
+      price: 0,
+      head: "/images/avatars/head/male2.png",
+      thumbnail: "/images/avatars/thumbnail/male2.png",
+      uploadedBy: 1,
+      uploadedAt: new Date().toISOString(),
+      sales: 0,
+      views: 0
+    },
+    // Female Variant 1
+    3: {
+      id: 3,
+      name: "Default Female",
+      price: 0,
+      head: "/images/avatars/head/female.png",
+      thumbnail: "/images/avatars/thumbnail/female.png",
+      uploadedBy: 1,
+      uploadedAt: new Date().toISOString(),
+      sales: 0,
+      views: 0
+    },
+    // Female Variant 2
+    4: {
+      id: 4,
+      name: "Default Female Alt",
+      price: 0,
+      head: "/images/avatars/head/female2.png",
+      thumbnail: "/images/avatars/thumbnail/female2.png",
+      uploadedBy: 1,
+      uploadedAt: new Date().toISOString(),
+      sales: 0,
+      views: 0
+    }
+  },
   userOutfits: {}
 };
 
