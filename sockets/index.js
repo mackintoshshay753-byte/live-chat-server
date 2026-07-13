@@ -233,6 +233,16 @@ function setupSockets(io) {
           return safeCb(cb, { message: "Username already taken" });
         }
 
+        // ✅ BLOCK NAMES PREVIOUSLY USED BY ANYONE ELSE (CASE‑INSENSITIVE)
+        const pastOwners = (data.usernameHistory || [])
+          .filter(entry => entry.oldUsername.toLowerCase() === lower);
+
+        if (pastOwners.length > 0) {
+          return safeCb(cb, {
+            message: "This username was previously used by another account — you cannot register it."
+          });
+        }
+
         if (!isStrongPassword(password)) {
           return safeCb(cb, { message: "Password must be 8+ chars with letters + numbers" });
         }
@@ -303,109 +313,84 @@ function setupSockets(io) {
       }
     });
 
-    socket.on("save-theme", ({ theme, username }, cb) => {
+    socket.on("change username", async ({ oldName, newName }, cb) => {
       try {
-        const name = sanitizeUsername(username);
-        if (!name || !['light', 'dark', 'classic'].includes(theme)) {
-          return safeCb(cb, { message: "Invalid theme or user" });
+        const cleanOld = sanitizeUsername(oldName);
+        const cleanNew = sanitizeUsername(newName);
+
+        if (!cleanOld || !cleanNew || cleanOld === cleanNew) {
+          return safeCb(cb, { message: "Invalid name change request" });
         }
 
-        if (data.accounts[name]) data.accounts[name].theme = theme;
-        if (data.userProfiles[name]) data.userProfiles[name].theme = theme;
+        const oldLower = cleanOld.toLowerCase();
+        const newLower = cleanNew.toLowerCase();
+
+        if (cleanNew.length < 3 || cleanNew.length > 20)
+          return safeCb(cb, { message: "New name must be 3–20 characters" });
+        if (!/^[a-zA-Z0-9_]+$/.test(cleanNew))
+          return safeCb(cb, { message: "Only letters, numbers and underscores allowed" });
+        if (data.registeredNames[newLower])
+          return safeCb(cb, { message: "New username already in use" });
+
+        // ✅ ONLY ORIGINAL OWNER CAN RECLAIM OLD NAMES
+        const pastOwners = (data.usernameHistory || [])
+          .filter(entry => entry.oldUsername.toLowerCase() === newLower)
+          .map(entry => entry.userId);
+
+        if (pastOwners.length > 0) {
+          const currentUserId = data.accounts[cleanOld]?.id;
+          const isOriginalOwner = pastOwners.every(id => id === currentUserId);
+
+          if (!isOriginalOwner) {
+            return safeCb(cb, { 
+              message: "This username was previously used by another account — you cannot claim it." 
+            });
+          }
+        }
+
+        if (!data.accounts[cleanOld])
+          return safeCb(cb, { message: "Original account not found" });
+
+        delete data.registeredNames[oldLower];
+        data.registeredNames[newLower] = true;
+
+        const oldAccount = data.accounts[cleanOld];
+        delete data.accounts[cleanOld];
+        data.accounts[cleanNew] = oldAccount;
+
+        const oldProfile = data.userProfiles[cleanOld];
+        if (oldProfile) {
+          delete data.userProfiles[cleanOld];
+          oldProfile.username = cleanNew;
+          data.userProfiles[cleanNew] = oldProfile;
+        }
+
+        if (data.usernameToId[cleanOld]) {
+          data.usernameToId[cleanNew] = data.usernameToId[cleanOld];
+          delete data.usernameToId[cleanOld];
+        }
+
+        if (onlineUsers.has(cleanOld)) {
+          onlineUsers.set(cleanNew, onlineUsers.get(cleanOld));
+          onlineUsers.delete(cleanOld);
+        }
+
+        data.usernameHistory.unshift({
+          userId: oldAccount.id,
+          oldUsername: cleanOld,
+          newUsername: cleanNew,
+          changedAt: new Date().toISOString()
+        });
 
         saveData();
-        safeCb(cb, { success: true });
+        io.emit("username updated", { oldName: cleanOld, newName: cleanNew });
+        safeCb(cb, { success: true, newName: cleanNew });
+
       } catch (err) {
-        console.error("Save Theme Error:", err);
-        safeCb(cb);
+        console.error("Change Username Error:", err);
+        safeCb(cb, { message: "Failed to change username — please try again" });
       }
     });
-
-    socket.on("change username", async ({ oldName, newName }, cb) => {
-  try {
-    const cleanOld = sanitizeUsername(oldName);
-    const cleanNew = sanitizeUsername(newName);
-
-    if (!cleanOld || !cleanNew || cleanOld === cleanNew) {
-      return safeCb(cb, { message: "Invalid name change request" });
-    }
-
-    const oldLower = cleanOld.toLowerCase();
-    const newLower = cleanNew.toLowerCase();
-
-    // --- Keep all your existing checks here ---
-    if (cleanNew.length < 3 || cleanNew.length > 20)
-      return safeCb(cb, { message: "New name must be 3–20 characters" });
-    if (!/^[a-zA-Z0-9_]+$/.test(cleanNew))
-      return safeCb(cb, { message: "Only letters, numbers and underscores allowed" });
-    if (data.registeredNames[newLower])
-      return safeCb(cb, { message: "New username already in use" });
-
-    // ✅ ========== NEW RULE: PREVENT TAKING OTHERS' PAST NAMES ==========
-    // Find ALL history entries for this new name (case-insensitive)
-    const pastOwners = (data.usernameHistory || [])
-      .filter(entry => entry.oldUsername.toLowerCase() === newLower)
-      .map(entry => entry.userId);
-
-    if (pastOwners.length > 0) {
-      // Get current user's ID
-      const currentUserId = data.accounts[cleanOld]?.id;
-      // Check if current user is the ONLY one who ever owned this name
-      const isOriginalOwner = pastOwners.every(id => id === currentUserId);
-
-      if (!isOriginalOwner) {
-        return safeCb(cb, { 
-          message: "This username was previously used by another account — you cannot claim it." 
-        });
-      }
-    }
-    // ✅ ========== END NEW RULE ==========
-
-    if (!data.accounts[cleanOld])
-      return safeCb(cb, { message: "Original account not found" });
-
-    // --- Keep all your existing rename logic here ---
-    delete data.registeredNames[oldLower];
-    data.registeredNames[newLower] = true;
-
-    const oldAccount = data.accounts[cleanOld];
-    delete data.accounts[cleanOld];
-    data.accounts[cleanNew] = oldAccount;
-
-    const oldProfile = data.userProfiles[cleanOld];
-    if (oldProfile) {
-      delete data.userProfiles[cleanOld];
-      oldProfile.username = cleanNew;
-      data.userProfiles[cleanNew] = oldProfile;
-    }
-
-    if (data.usernameToId[cleanOld]) {
-      data.usernameToId[cleanNew] = data.usernameToId[cleanOld];
-      delete data.usernameToId[cleanOld];
-    }
-
-    if (onlineUsers.has(cleanOld)) {
-      onlineUsers.set(cleanNew, onlineUsers.get(cleanOld));
-      onlineUsers.delete(cleanOld);
-    }
-
-    // Save to history
-    data.usernameHistory.unshift({
-      userId: oldAccount.id,
-      oldUsername: cleanOld,
-      newUsername: cleanNew,
-      changedAt: new Date().toISOString()
-    });
-
-    saveData();
-    io.emit("username updated", { oldName: cleanOld, newName: cleanNew });
-    safeCb(cb, { success: true, newName: cleanNew });
-
-  } catch (err) {
-    console.error("Change Username Error:", err);
-    safeCb(cb, { message: "Failed to change username — please try again" });
-  }
-});
 
     socket.on("change password", async ({ username, newPassword, currentPassword }, cb) => {
       try {
@@ -457,7 +442,6 @@ function setupSockets(io) {
 
     socket.on("send-message", async ({ toId, text }) => {
       if (!currentUserId || !toId || !text.trim()) return;
-
       const convId = getChatId(currentUserId, toId);
       const senderProfile = Object.values(data.userProfiles).find(p => p.id === currentUserId);
 
@@ -483,7 +467,6 @@ function setupSockets(io) {
       }
     });
 
-    // ✅ Fixed typing events
     socket.on("typing", ({ toId }) => {
       if (!currentUserId || !toId) return;
       const receiver = Object.values(data.userProfiles).find(p => p.id === Number(toId));
