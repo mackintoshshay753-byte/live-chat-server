@@ -14,28 +14,25 @@ if (!data.users) data.users = {};
  * GET /outfits/:id
  */
 
-router.get('/recommended', (req, res) => {
-  const limit = Math.max(1, parseInt(req.query.limit, 10) || 12);
+router.get('/recommended',(req,res)=>{
+  const limit=Math.max(1,parseInt(req.query.limit)||12);
 
-  const recommended = Object.values(data.outfitCatalog)
-    .map(outfit => ({
-      ...outfit,
-      sales: outfit.sales || 0,
-      views: outfit.views || 0,
-      score: ((outfit.sales || 0) * 2) + (outfit.views || 0)
-    }))
-    .sort((a, b) => {
-      if (b.score !== a.score) return b.score - a.score;
-      if ((b.sales || 0) !== (a.sales || 0)) return (b.sales || 0) - (a.sales || 0);
-      return (b.views || 0) - (a.views || 0);
+  const outfits=Object.values(data.outfitCatalog)
+    .map(o=>{
+      const u=data.users[o.uploadedBy]||{};
+      return {
+        ...o,
+        creatorName:u.username||`User ${o.uploadedBy||0}`,
+        creatorUrl:`/users/profile?id=${o.uploadedBy||0}`,
+        sales:o.sales||0,
+        views:o.views||0,
+        score:(o.sales||0)*2+(o.views||0)
+      };
     })
-    .slice(0, limit);
+    .sort((a,b)=>b.score-a.score||b.sales-a.sales||b.views-a.views)
+    .slice(0,limit);
 
-  res.json({
-    success: true,
-    count: recommended.length,
-    outfits: recommended
-  });
+  res.json({success:true,count:outfits.length,outfits});
 });
 
 router.get('/:id', (req, res) => {
