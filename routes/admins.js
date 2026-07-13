@@ -185,7 +185,16 @@ router.get('/logs', (req, res) => {
 // ✅ FIXED CREATE ACCOUNT ROUTE
 router.post('/create-account', async (req, res) => {
   try {
-    const { actorId, username, password, role = "user", gender = "", birthday = "" } = req.body;
+    const {
+  actorId,
+  username,
+  password,
+  role = "user",
+  gender = "",
+  birthday = "",
+  head = "",
+  thumbnail = ""
+} = req.body;
     if (!actorId || !username || !password || !gender || !birthday) 
       return res.status(400).json({ success: false, error: "All fields are required" });
 
@@ -202,6 +211,32 @@ router.post('/create-account', async (req, res) => {
 
     if (!(password.length >= 8 && /[a-zA-Z]/.test(password) && /[0-9]/.test(password))) 
       return res.status(400).json({ success: false, error: "Weak password" });
+
+    // Validate avatar images
+if (!head || !thumbnail) {
+  return res.status(400).json({
+    success: false,
+    error: "Head and thumbnail images are required."
+  });
+}
+
+if (
+  !head.startsWith("data:image/") ||
+  !thumbnail.startsWith("data:image/")
+) {
+  return res.status(400).json({
+    success: false,
+    error: "Invalid image format."
+  });
+}
+
+// Prevent massive data.json files (1MB each max)
+if (head.length > 1024 * 1024 || thumbnail.length > 1024 * 1024) {
+  return res.status(400).json({
+    success: false,
+    error: "Image is too large."
+  });
+}
 
     const finalRole = ["user", "moderator", "admin", "owner"].includes(role) ? role : "user";
 
@@ -240,6 +275,8 @@ router.post('/create-account', async (req, res) => {
       role: finalRole, 
       joinDate, 
       gender: gender.charAt(0).toUpperCase() + gender.slice(1), // "male" → "Male"
+      head,
+      thumbnail,
       birthday: birthdayObj,
       isOnline: false, 
       lastOnline: null, 
