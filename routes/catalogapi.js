@@ -8,7 +8,7 @@ const ALLOWED_UPLOAD_IDS = [1];
 if (!data.outfitCatalog) data.outfitCatalog = {};
 if (!data.nextOutfitId) data.nextOutfitId = 1;
 
-// Get single outfit
+// Get single outfit WITH creator username
 router.get('/:id', (req, res) => {
   const outfitId = parseInt(req.params.id);
   if (isNaN(outfitId)) {
@@ -19,6 +19,9 @@ router.get('/:id', (req, res) => {
   if (!outfit) {
     return res.status(404).json({ success: false, message: "Outfit not found" });
   }
+
+  // Get creator username if available
+  const creator = data.users?.[outfit.uploadedBy] || { username: `User ${outfit.uploadedBy}` };
   
   res.json({ 
     success: true, 
@@ -28,7 +31,8 @@ router.get('/:id', (req, res) => {
       price: outfit.price,
       thumbnailUrl: outfit.thumbnail,
       head: outfit.head,
-      creator: outfit.uploadedBy,
+      creatorId: outfit.uploadedBy,
+      creatorName: creator.username,
       creatorUrl: `/users/profile?id=${outfit.uploadedBy}`
     }
   });
