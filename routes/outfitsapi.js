@@ -5,44 +5,6 @@ const { data, saveData } = require('../data');
 // Ensure base structures exist
 if (!data.userOutfits) data.userOutfits = {};
 if (!data.outfitCatalog) data.outfitCatalog = {};
-if (!data.users) data.users = {}; // Make sure users table exists
-
-// Helper function to get user by ID
-function findUserById(userId) {
-  if (!userId) return null;
-  const uid = Number(userId);
-  return data.users[uid] || data.users[String(uid)] || null;
-}
-
-/**
- * GET - Recommended outfits (with correct creator info)
- */
-router.get('/recommended', (req, res) => {
-  const limit = Math.max(1, parseInt(req.query.limit) || 7); // Default to top 7
-
-  const outfits = Object.values(data.outfitCatalog)
-    .map(o => {
-      const creator = findUserById(o.uploadedBy) || {};
-      return {
-        id: o.id,
-        name: o.name,
-        price: o.price,
-        thumbnail: o.thumbnail,
-        uploadedBy: o.uploadedBy || 0,
-        creatorId: o.uploadedBy || 0,
-        // Return actual name or fallback
-        creatorName: creator.username || `User ${o.uploadedBy || 0}`,
-        creatorUrl: `/users/profile?id=${o.uploadedBy || 0}`,
-        sales: o.sales || 0,
-        views: o.views || 0,
-        score: ((o.sales || 0) * 2) + (o.views || 0)
-      };
-    })
-    .sort((a, b) => b.score - a.score)
-    .slice(0, limit);
-
-  res.json({ success: true, count: outfits.length, outfits });
-});
 
 /**
  * GET - Fetch all outfits a user owns + equipped
@@ -62,16 +24,7 @@ router.get('/my', async (req, res) => {
 
     const userData = data.userOutfits[userId];
     const ownedOutfits = userData.owned
-      .map(outfitId => {
-        const o = data.outfitCatalog[outfitId];
-        if (!o) return null;
-        const creator = findUserById(o.uploadedBy) || {};
-        return {
-          ...o,
-          creatorName: creator.username || `User ${o.uploadedBy || 0}`,
-          creatorUrl: `/users/profile?id=${o.uploadedBy || 0}`
-        };
-      })
+      .map(outfitId => data.outfitCatalog[outfitId])
       .filter(Boolean);
 
     res.json({
