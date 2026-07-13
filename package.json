@@ -21,7 +21,6 @@
     "@tensorflow-models/toxicity": "^1.2.2",
     "@tensorflow/tfjs": "^4.22.0",
     "bcrypt": "^6.0.0",
-    "certifi": "^14.5.15",
     "compression": "^1.8.1",
     "cors": "^2.8.5",
     "dotenv": "^16.6.1",

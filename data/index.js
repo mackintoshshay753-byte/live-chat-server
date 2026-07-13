@@ -1,9 +1,9 @@
-const { MongoClient, ServerApiVersion } = require('mongodb');
-const certifi = require('certifi');
+const fs = require('fs').promises; // Switching to async promises
+const { existsSync, renameSync } = require('fs'); // Keep sync only for emergency crash fallback
+const path = require('path');
 
-const MONGODB_URI = process.env.MONGODB_URI;
-const DB_NAME = "chatDB";
-const COLLECTION_NAME = "appData";
+const DATA_PATH = path.join(__dirname, 'chat-data.json');
+const TEMP_DATA_PATH = path.join(__dirname, 'chat-data.tmp.json');
 
 const DEFAULT_DATA = {
   nextUserId: 1,
@@ -19,81 +19,142 @@ const DEFAULT_DATA = {
   deletedAccounts: {},
   groups: [],
   nextGroupId: 1,
-  nextOutfitId: 5,
+  ads: {},
+  nextOutfitId: 5, // Keep IDs starting after these 4
   outfitCatalog: {
-    1: { id:1, name:"Default Male", price:0, head:"/images/avatars/head/male.png", thumbnail:"/images/avatars/thumbnail/male.png", uploadedBy:1, uploadedAt: new Date().toISOString(), sales:0, views:0 },
-    2: { id:2, name:"Default Male Alt", price:0, head:"/images/avatars/head/male2.png", thumbnail:"/images/avatars/thumbnail/male_2.png", uploadedBy:1, uploadedAt: new Date().toISOString(), sales:0, views:0 },
-    3: { id:3, name:"Default Female", price:0, head:"/images/avatars/head/female.png", thumbnail:"/images/avatars/thumbnail/female.png", uploadedBy:1, uploadedAt: new Date().toISOString(), sales:0, views:0 },
-    4: { id:4, name:"Default Female Alt", price:0, head:"/images/avatars/head/female2.png", thumbnail:"/images/avatars/thumbnail/female_2.png", uploadedBy:1, uploadedAt: new Date().toISOString(), sales:0, views:0 }
+    // Male Variant 1
+    1: {
+      id: 1,
+      name: "Default Male",
+      price: 0, // Free
+      head: "/images/avatars/head/male.png",
+      thumbnail: "/images/avatars/thumbnail/male.png",
+      uploadedBy: 1, // Matches your owner user ID
+      uploadedAt: new Date().toISOString(),
+      sales: 0,
+      views: 0
+    },
+    // Male Variant 2
+    2: {
+      id: 2,
+      name: "Default Male Alt",
+      price: 0,
+      head: "/images/avatars/head/male2.png",
+      thumbnail: "/images/avatars/thumbnail/male_2.png",
+      uploadedBy: 1,
+      uploadedAt: new Date().toISOString(),
+      sales: 0,
+      views: 0
+    },
+    // Female Variant 1
+    3: {
+      id: 3,
+      name: "Default Female",
+      price: 0,
+      head: "/images/avatars/head/female.png",
+      thumbnail: "/images/avatars/thumbnail/female.png",
+      uploadedBy: 1,
+      uploadedAt: new Date().toISOString(),
+      sales: 0,
+      views: 0
+    },
+    // Female Variant 2
+    4: {
+      id: 4,
+      name: "Default Female Alt",
+      price: 0,
+      head: "/images/avatars/head/female2.png",
+      thumbnail: "/images/avatars/thumbnail/female_2.png",
+      uploadedBy: 1,
+      uploadedAt: new Date().toISOString(),
+      sales: 0,
+      views: 0
+    }
   },
   userOutfits: {}
 };
 
-let mongoClient, db, appDataCol;
+// In-memory data reference
 let data = { ...DEFAULT_DATA };
 const ACTUAL_OWNER_USERNAME = "sadieandshay87";
-let isSaving = false, savePending = false, isConnected = false;
 
-async function connectMongo() {
-  if (isConnected) return;
-  try {
-    mongoClient = new MongoClient(MONGODB_URI, {
-      serverApi: { version: ServerApiVersion.v1, strict: true, deprecationErrors: true },
-      tls: true,
-      tlsCAFile: certifi.where(), // ✅ Fixes SSL alert 80 on Render
-      serverSelectionTimeoutMS: 10000,
-      connectTimeoutMS: 15000
-    });
-    await mongoClient.connect();
-    db = mongoClient.db(DB_NAME);
-    appDataCol = db.collection(COLLECTION_NAME);
-    isConnected = true;
-    console.log("✅ Connected to MongoDB Atlas successfully");
-  } catch (err) {
-    console.error("❌ MongoDB connect failed:", err.message);
-    throw err;
-  }
-}
+// Keep track of ongoing save operations to prevent overlapping writes
+let isSaving = false;
+let savePending = false;
 
 async function loadData() {
   try {
-    await connectMongo();
-    const stored = await appDataCol.findOne({ _id: "main" });
-    data = stored ? { ...DEFAULT_DATA, ...stored.data } : { ...DEFAULT_DATA };
-    console.log("✅ Data loaded from MongoDB");
+    // existsSync is fine for initial startup checking
+    if (!existsSync(DATA_PATH)) {
+      console.log("📄 No data file — starting fresh");
+      await saveData();
+      return;
+    }
 
+    const raw = await fs.readFile(DATA_PATH, 'utf8');
+    const loaded = JSON.parse(raw);
+    
+    // Deep-ish merge to ensure all top-level keys exist
+    data = { ...DEFAULT_DATA, ...loaded };
+
+    // Sync roles from userProfiles into accounts
     Object.entries(data.userProfiles || {}).forEach(([uname, prof]) => {
       if (!data.accounts[uname]) data.accounts[uname] = { id: prof.id };
       data.accounts[uname].role = prof.role || "user";
     });
 
+    // Force main owner role
     if (data.userProfiles[ACTUAL_OWNER_USERNAME]) {
-      data.userProfiles[ACTUAL_OWNER_USERNAME].role = "owner";
-      data.accounts[ACTUAL_OWNER_USERNAME].role = "owner";
-      await saveData();
+      if (data.userProfiles[ACTUAL_OWNER_USERNAME].role !== "owner") {
+        data.userProfiles[ACTUAL_OWNER_USERNAME].role = "owner";
+        data.accounts[ACTUAL_OWNER_USERNAME].role = "owner";
+        await saveData();
+        console.log(`✅ ${ACTUAL_OWNER_USERNAME} set as Owner`);
+      }
+    } else {
+      console.log(`ℹ️ ${ACTUAL_OWNER_USERNAME} will be Owner when registered`);
     }
+
+    console.log("✅ Data loaded successfully");
   } catch (err) {
-    console.error("⚠️ Load failed — starting fresh:", err.message);
+    console.error("⚠️ Data corruption/error detected — backing up and restarting fresh:", err.message);
+    
+    // Sync backup fallback since we are handling a catastrophic boot failure
+    if (existsSync(DATA_PATH)) {
+      renameSync(DATA_PATH, `${DATA_PATH}.bak-${Date.now()}.json`);
+    }
+    
     data = { ...DEFAULT_DATA };
     await saveData();
   }
 }
 
 async function saveData() {
-  if (isSaving) { savePending = true; return; }
+  // Queue system: If already saving, flag that we need another save when done
+  if (isSaving) {
+    savePending = true;
+    return;
+  }
+  
   isSaving = true;
+
   try {
-    await connectMongo();
-    await appDataCol.replaceOne(
-      { _id: "main" },
-      { _id: "main", data, updatedAt: new Date().toISOString() },
-      { upsert: true }
-    );
+    const payload = JSON.stringify(data, null, 2);
+    
+    // ATOMIC WRITE: Write to a temp file first, then rename it.
+    // This ensures that if the server crashes mid-write, your actual data file isn't left half-written/corrupted.
+    await fs.writeFile(TEMP_DATA_PATH, payload, 'utf8');
+    await fs.rename(TEMP_DATA_PATH, DATA_PATH);
   } catch (err) {
     console.error("❌ Save failed:", err.message);
   } finally {
     isSaving = false;
-    if (savePending) { savePending = false; await saveData(); }
+    
+    // If a save request came in while we were writing, run it now
+    if (savePending) {
+      savePending = false;
+      await saveData();
+    }
   }
 }
 
@@ -101,8 +162,12 @@ function setRoleOnSignup(username, role = "user") {
   return username === ACTUAL_OWNER_USERNAME ? "owner" : role;
 }
 
+// Export a getter/setter function for data so other files don't accidentally break the reference
 module.exports = { 
-  get data() { return data },
-  setData: newData => { data = newData },
-  loadData, saveData, setRoleOnSignup, ACTUAL_OWNER_USERNAME 
+  get data() { return data; },
+  setData: (newData) => { data = newData; },
+  loadData, 
+  saveData, 
+  setRoleOnSignup, 
+  ACTUAL_OWNER_USERNAME 
 };
