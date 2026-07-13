@@ -29,9 +29,7 @@ router.get("/profile/:id", (req, res) => {
       birthday: profile.birthday ?? null,
       gender: profile.gender ?? null,
       status: profile.status ?? "",
-      isOnline,
-      head: profile.head || "/images/avatars/head/default.png",
-      thumbnail: profile.thumbnail || "/images/avatars/thumbnail/default.png"
+      isOnline // ✅ Add this line — matches the same logic as your search route
     });
 
   } catch (err) {
