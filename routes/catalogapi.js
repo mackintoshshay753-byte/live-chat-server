@@ -66,7 +66,9 @@ router.get('/:id', (req, res) => {
       creatorId: uploadedBy,
       creatorName: creator.username,
       creatorUrl: `/users/profile?id=${uploadedBy}`,
-      uploadedAt: outfit.uploadedAt || null
+      uploadedAt: outfit.uploadedAt || null,
+      sales: outfit.sales || 0,
+      views: outfit.views || 0
     }
   });
 });
