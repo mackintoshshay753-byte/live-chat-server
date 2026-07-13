@@ -1,4 +1,5 @@
 const { MongoClient, ServerApiVersion } = require('mongodb');
+const certifi = require('certifi');
 
 const MONGODB_URI = process.env.MONGODB_URI;
 const DB_NAME = "chatDB";
@@ -37,13 +38,17 @@ async function connectMongo() {
   if (isConnected) return;
   try {
     mongoClient = new MongoClient(MONGODB_URI, {
-      serverApi: { version: ServerApiVersion.v1, strict: true, deprecationErrors: true }
+      serverApi: { version: ServerApiVersion.v1, strict: true, deprecationErrors: true },
+      tls: true,
+      tlsCAFile: certifi.where(), // ✅ Fixes SSL alert 80 on Render
+      serverSelectionTimeoutMS: 10000,
+      connectTimeoutMS: 15000
     });
     await mongoClient.connect();
     db = mongoClient.db(DB_NAME);
     appDataCol = db.collection(COLLECTION_NAME);
     isConnected = true;
-    console.log("✅ Connected to MongoDB Atlas");
+    console.log("✅ Connected to MongoDB Atlas successfully");
   } catch (err) {
     console.error("❌ MongoDB connect failed:", err.message);
     throw err;
