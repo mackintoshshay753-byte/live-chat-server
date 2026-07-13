@@ -1,25 +1,23 @@
 const express = require('express');
 const router = express.Router();
-
-// ✅ CHANGE: Use your existing data.js instead of chat-data
 const { data, saveData } = require('../data');
 
+// Ensure base structures exist
+if (!data.userOutfits) data.userOutfits = {};
+if (!data.outfitCatalog) data.outfitCatalog = {};
+
 /**
- * GET - Fetch all outfits a user owns, plus currently equipped
+ * GET - Fetch all outfits a user owns + equipped
  * Query: ?userId=X
  */
 router.get('/my', async (req, res) => {
   try {
     const userId = parseInt(req.query.userId);
-    if (!userId) {
-      return res.status(400).json({ success: false, message: "User ID is required" });
+    if (isNaN(userId) || userId <= 0) {
+      return res.status(400).json({ success: false, message: "Valid user ID is required" });
     }
 
-    // Initialize structures if missing
-    if (!data.userOutfits) data.userOutfits = {};
-    if (!data.outfitCatalog) data.outfitCatalog = {};
-
-    // Get user's inventory, create if missing
+    // Create user entry if it doesn't exist
     if (!data.userOutfits[userId]) {
       data.userOutfits[userId] = { equipped: null, owned: [] };
     }
@@ -37,7 +35,7 @@ router.get('/my', async (req, res) => {
 
   } catch (err) {
     console.error("Error loading inventory:", err);
-    res.status(500).json({ success: false, message: "Server error" });
+    res.status(500).json({ success: false, message: "Server error loading inventory" });
   }
 });
 
@@ -45,23 +43,21 @@ router.get('/my', async (req, res) => {
  * POST - Buy / Claim an outfit
  * Body: { userId, outfitId }
  */
-router.post('/buy', async (req, res) => {
+router.post('/buy', express.json(), async (req, res) => {
   try {
     const { userId, outfitId } = req.body;
     const uid = parseInt(userId);
     const oid = parseInt(outfitId);
 
-    if (!uid || !oid) {
-      return res.status(400).json({ success: false, message: "User ID and Outfit ID are required" });
+    if (isNaN(uid) || isNaN(oid)) {
+      return res.status(400).json({ success: false, message: "Valid user ID and outfit ID are required" });
     }
 
-    if (!data.outfitCatalog) data.outfitCatalog = {};
     const outfit = data.outfitCatalog[oid];
     if (!outfit) {
-      return res.status(404).json({ success: false, message: "Outfit not found" });
+      return res.status(404).json({ success: false, message: "Outfit not found in catalog" });
     }
 
-    if (!data.userOutfits) data.userOutfits = {};
     if (!data.userOutfits[uid]) {
       data.userOutfits[uid] = { equipped: null, owned: [] };
     }
@@ -73,11 +69,11 @@ router.post('/buy', async (req, res) => {
     data.userOutfits[uid].owned.push(oid);
     await saveData();
 
-    res.json({ success: true, message: "Outfit added to your inventory" });
+    res.json({ success: true, message: "✅ Outfit added to your inventory" });
 
   } catch (err) {
     console.error("Error buying outfit:", err);
-    res.status(500).json({ success: false, message: "Server error" });
+    res.status(500).json({ success: false, message: "Failed to purchase outfit" });
   }
 });
 
@@ -85,33 +81,33 @@ router.post('/buy', async (req, res) => {
  * POST - Equip an outfit
  * Body: { userId, outfitId }
  */
-router.post('/equip', async (req, res) => {
+router.post('/equip', express.json(), async (req, res) => {
   try {
     const { userId, outfitId } = req.body;
     const uid = parseInt(userId);
     const oid = parseInt(outfitId);
 
-    if (!uid) {
-      return res.status(400).json({ success: false, message: "User ID is required" });
+    if (isNaN(uid) || isNaN(oid)) {
+      return res.status(400).json({ success: false, message: "Valid user ID and outfit ID are required" });
     }
 
-    if (!data.userOutfits || !data.userOutfits[uid]) {
+    if (!data.userOutfits[uid]) {
       return res.status(404).json({ success: false, message: "User inventory not found" });
     }
 
     const userData = data.userOutfits[uid];
     if (!userData.owned.includes(oid)) {
-      return res.status(403).json({ success: false, message: "You do not own this outfit" });
+      return res.status(403).json({ success: false, message: "You must own this outfit to equip it" });
     }
 
     userData.equipped = oid;
     await saveData();
 
-    res.json({ success: true, message: "Outfit equipped", equippedId: oid });
+    res.json({ success: true, message: "✅ Outfit equipped", equippedId: oid });
 
   } catch (err) {
     console.error("Error equipping outfit:", err);
-    res.status(500).json({ success: false, message: "Server error" });
+    res.status(500).json({ success: false, message: "Failed to equip outfit" });
   }
 });
 

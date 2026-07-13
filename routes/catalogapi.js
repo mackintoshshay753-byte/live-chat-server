@@ -4,62 +4,75 @@ const { data, saveData } = require('../data');
 
 const ALLOWED_UPLOAD_IDS = [1];
 
+// Ensure base structure exists
+if (!data.outfitCatalog) data.outfitCatalog = {};
+if (!data.nextOutfitId) data.nextOutfitId = 1;
+
 // Get single outfit
 router.get('/:id', (req, res) => {
-  const outfit = data.outfitCatalog?.[req.params.id];
-  if (!outfit) return res.status(404).json({ success: false, message: "Outfit not found" });
-  
-  res.json({ success: true, outfit: {
-    id: outfit.id, name: outfit.name, price: outfit.price,
-    thumbnailUrl: outfit.thumbnail, head: outfit.head,
-    creator: outfit.uploadedBy, creatorUrl: `/users/profile?id=${outfit.uploadedBy}`
-  }});
-});
+  const outfitId = parseInt(req.params.id);
+  if (isNaN(outfitId)) {
+    return res.status(400).json({ success: false, message: "Invalid outfit ID" });
+  }
 
+  const outfit = data.outfitCatalog[outfitId];
+  if (!outfit) {
+    return res.status(404).json({ success: false, message: "Outfit not found" });
+  }
+  
+  res.json({ 
+    success: true, 
+    outfit: {
+      id: outfit.id,
+      name: outfit.name,
+      price: outfit.price,
+      thumbnailUrl: outfit.thumbnail,
+      head: outfit.head,
+      creator: outfit.uploadedBy,
+      creatorUrl: `/users/profile?id=${outfit.uploadedBy}`
+    }
+  });
+});
 
 // Get all outfits
 router.get('/', (req, res) => {
-  if (!data.outfitCatalog) data.outfitCatalog = {};
   res.json({ success: true, catalog: data.outfitCatalog });
 });
 
-// Upload — accepts Base64 strings only
+// Upload new outfit
 router.post('/upload', express.json({ limit: '10mb' }), async (req, res) => {
   try {
     const { name, price, head, thumbnail, uploaderId } = req.body;
+    const uid = Number(uploaderId);
 
-    if (!ALLOWED_UPLOAD_IDS.includes(Number(uploaderId))) {
-      return res.status(403).json({ success: false, message: "Not authorized" });
+    if (!ALLOWED_UPLOAD_IDS.includes(uid)) {
+      return res.status(403).json({ success: false, message: "Not authorized to upload" });
     }
 
-    if (!name || !price || !head || !thumbnail) {
-      return res.status(400).json({ success: false, message: "All fields and images are required" });
+    if (!name?.trim() || price === undefined || !head || !thumbnail) {
+      return res.status(400).json({ success: false, message: "All fields (name, price, head, thumbnail) are required" });
     }
-
-    if (!data.nextOutfitId) data.nextOutfitId = 1;
-    if (!data.outfitCatalog) data.outfitCatalog = {};
 
     const outfitId = data.nextOutfitId;
 
-    // Save directly as Base64 data URL
     data.outfitCatalog[outfitId] = {
       id: outfitId,
       name: name.trim(),
-      price: Number(price),
+      price: Number(price) || 0,
       head: head,
       thumbnail: thumbnail,
-      uploadedBy: Number(uploaderId),
+      uploadedBy: uid,
       uploadedAt: new Date().toISOString()
     };
 
     data.nextOutfitId += 1;
     await saveData();
 
-    res.json({ success: true, message: "✅ Outfit saved", outfitId });
+    res.json({ success: true, message: "✅ Outfit saved successfully", outfitId });
 
   } catch (err) {
     console.error("Upload error:", err);
-    res.status(500).json({ success: false, message: err.message || "Failed to save" });
+    res.status(500).json({ success: false, message: err.message || "Failed to save outfit" });
   }
 });
 
