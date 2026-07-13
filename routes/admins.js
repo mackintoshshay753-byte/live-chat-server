@@ -182,12 +182,16 @@ router.get('/logs', (req, res) => {
   }
 });
 
-// ✅ FIXED CREATE ACCOUNT ROUTE
+// ✅ FULLY UPDATED CREATE ACCOUNT ROUTE WITH AVATAR SUPPORT
 router.post('/create-account', async (req, res) => {
   try {
-    const { actorId, username, password, role = "user", gender = "", birthday = "" } = req.body;
-    if (!actorId || !username || !password || !gender || !birthday) 
-      return res.status(400).json({ success: false, error: "All fields are required" });
+    const { 
+      actorId, username, password, role = "user", gender = "", birthday = "",
+      headAvatar, thumbnailAvatar
+    } = req.body;
+
+    if (!actorId || !username || !password || !gender || !birthday || !headAvatar || !thumbnailAvatar) 
+      return res.status(400).json({ success: false, error: "All fields including avatar images are required" });
 
     const actor = resolveTarget(actorId);
     if (!actor || !isMainOwner(actor)) 
@@ -212,7 +216,7 @@ router.post('/create-account', async (req, res) => {
     const joinDate = new Date().toISOString();
     const hash = await bcrypt.hash(password, 12);
 
-    // ✅ Convert birthday from "YYYY-MM-DD" to your object format
+    // Convert birthday from "YYYY-MM-DD" to your object format
     const birthdayParts = birthday.split("-");
     const monthNames = ["January","February","March","April","May","June","July","August","September","October","November","December"];
     const birthdayObj = {
@@ -230,20 +234,25 @@ router.post('/create-account', async (req, res) => {
       banUntil: null, 
       joinDate, 
       theme: "light", 
-      verified: false 
+      verified: false,
+      // Store custom avatars directly on the account
+      customHead: headAvatar,
+      customThumbnail: thumbnailAvatar
     };
 
-    // ✅ Matches your existing profile structure
     const newProfile = { 
       id: newId, 
       username: clean, 
       role: finalRole, 
       joinDate, 
-      gender: gender.charAt(0).toUpperCase() + gender.slice(1), // "male" → "Male"
+      gender: gender.charAt(0).toUpperCase() + gender.slice(1),
       birthday: birthdayObj,
       isOnline: false, 
       lastOnline: null, 
-      createdAt: joinDate 
+      createdAt: joinDate,
+      // Also add to profile for easy access
+      headAvatar: headAvatar,
+      thumbnailAvatar: thumbnailAvatar
     };
 
     data.accounts[clean] = newAccount;
