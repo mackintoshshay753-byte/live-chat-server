@@ -28,16 +28,13 @@ const DEFAULT_DATA = {
   userOutfits: {}
 };
 
-let mongoClient;
-let db;
-let appDataCol;
+let mongoClient, db, appDataCol;
 let data = { ...DEFAULT_DATA };
 const ACTUAL_OWNER_USERNAME = "sadieandshay87";
-
-let isSaving = false;
-let savePending = false;
+let isSaving = false, savePending = false, isConnected = false;
 
 async function connectMongo() {
+  if (isConnected) return;
   try {
     mongoClient = new MongoClient(MONGODB_URI, {
       serverApi: { version: ServerApiVersion.v1, strict: true, deprecationErrors: true }
@@ -45,6 +42,7 @@ async function connectMongo() {
     await mongoClient.connect();
     db = mongoClient.db(DB_NAME);
     appDataCol = db.collection(COLLECTION_NAME);
+    isConnected = true;
     console.log("✅ Connected to MongoDB Atlas");
   } catch (err) {
     console.error("❌ MongoDB connect failed:", err.message);
@@ -56,15 +54,8 @@ async function loadData() {
   try {
     await connectMongo();
     const stored = await appDataCol.findOne({ _id: "main" });
-
-    if (!stored) {
-      console.log("📄 No data found — initializing defaults");
-      data = { ...DEFAULT_DATA };
-      await saveData();
-    } else {
-      data = { ...DEFAULT_DATA, ...stored.data };
-      console.log("✅ Data loaded from MongoDB");
-    }
+    data = stored ? { ...DEFAULT_DATA, ...stored.data } : { ...DEFAULT_DATA };
+    console.log("✅ Data loaded from MongoDB");
 
     Object.entries(data.userProfiles || {}).forEach(([uname, prof]) => {
       if (!data.accounts[uname]) data.accounts[uname] = { id: prof.id };
@@ -75,9 +66,7 @@ async function loadData() {
       data.userProfiles[ACTUAL_OWNER_USERNAME].role = "owner";
       data.accounts[ACTUAL_OWNER_USERNAME].role = "owner";
       await saveData();
-      console.log(`✅ ${ACTUAL_OWNER_USERNAME} set as Owner`);
     }
-
   } catch (err) {
     console.error("⚠️ Load failed — starting fresh:", err.message);
     data = { ...DEFAULT_DATA };
@@ -88,8 +77,8 @@ async function loadData() {
 async function saveData() {
   if (isSaving) { savePending = true; return; }
   isSaving = true;
-
   try {
+    await connectMongo();
     await appDataCol.replaceOne(
       { _id: "main" },
       { _id: "main", data, updatedAt: new Date().toISOString() },
@@ -108,10 +97,7 @@ function setRoleOnSignup(username, role = "user") {
 }
 
 module.exports = { 
-  get data() { return data; },
-  setData: (newData) => { data = newData; },
-  loadData, 
-  saveData, 
-  setRoleOnSignup, 
-  ACTUAL_OWNER_USERNAME 
+  get data() { return data },
+  setData: newData => { data = newData },
+  loadData, saveData, setRoleOnSignup, ACTUAL_OWNER_USERNAME 
 };
