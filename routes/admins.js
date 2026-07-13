@@ -3,6 +3,7 @@ const router = express.Router();
 const bcrypt = require('bcrypt');
 const { data, saveData } = require('../data');
 const { hasRole } = require('./permissions');
+const { assignPermanentDefaultOutfit } = require('../sockets');
 
 if (!data.deletedAccounts) data.deletedAccounts = {};
 
@@ -182,10 +183,12 @@ router.get('/logs', (req, res) => {
   }
 });
 
-// ✅ FIXED CREATE ACCOUNT ROUTE
 router.post('/create-account', async (req, res) => {
   try {
-    const { actorId, username, password, role = "user", gender = "", birthday = ""} = req.body;
+    const { 
+      actorId, username, password, role = "user", gender = "", birthday = "",
+      customHead, customThumbnail // ✅ Accept new fields
+    } = req.body;
     if (!actorId || !username || !password || !gender || !birthday) 
       return res.status(400).json({ success: false, error: "All fields are required" });
 
@@ -212,7 +215,6 @@ router.post('/create-account', async (req, res) => {
     const joinDate = new Date().toISOString();
     const hash = await bcrypt.hash(password, 12);
 
-    // ✅ Convert birthday from "YYYY-MM-DD" to your object format
     const birthdayParts = birthday.split("-");
     const monthNames = ["January","February","March","April","May","June","July","August","September","October","November","December"];
     const birthdayObj = {
@@ -233,13 +235,12 @@ router.post('/create-account', async (req, res) => {
       verified: false 
     };
 
-    // ✅ Matches your existing profile structure
     const newProfile = { 
       id: newId, 
       username: clean, 
       role: finalRole, 
       joinDate, 
-      gender: gender.charAt(0).toUpperCase() + gender.slice(1), // "male" → "Male"
+      gender: gender.charAt(0).toUpperCase() + gender.slice(1),
       birthday: birthdayObj,
       isOnline: false, 
       lastOnline: null, 
@@ -250,6 +251,32 @@ router.post('/create-account', async (req, res) => {
     data.userProfiles[clean] = newProfile;
     data.registeredNames[lower] = clean;
     data.usernameToId[clean] = newId;
+
+    // ✅ CUSTOM AVATAR LOGIC
+    if (customHead && customThumbnail) {
+      // If you provided custom URLs → create a one‑time custom outfit & equip it
+      const customOutfitId = data.nextOutfitId;
+      data.outfitCatalog[customOutfitId] = {
+        id: customOutfitId,
+        name: `Custom: ${clean}`,
+        price: 0,
+        head: customHead.trim(),
+        thumbnail: customThumbnail.trim(),
+        uploadedBy: 1,
+        uploadedAt: joinDate,
+        sales: 1,
+        views: 0
+      };
+      data.nextOutfitId += 1;
+
+      // Assign & equip immediately
+      if (!data.userOutfits[newId]) data.userOutfits[newId] = { equipped: null, owned: [] };
+      data.userOutfits[newId].owned.push(customOutfitId);
+      data.userOutfits[newId].equipped = customOutfitId;
+    } else {
+      // No custom URLs → use your existing random default outfit
+      await assignPermanentDefaultOutfit(newId, gender);
+    }
 
     data.moderationLogs.push({ 
       type: "CREATE_ACCOUNT", 
