@@ -333,15 +333,38 @@ function setupSockets(io) {
     const oldLower = cleanOld.toLowerCase();
     const newLower = cleanNew.toLowerCase();
 
+    // --- Keep all your existing checks here ---
     if (cleanNew.length < 3 || cleanNew.length > 20)
       return safeCb(cb, { message: "New name must be 3–20 characters" });
     if (!/^[a-zA-Z0-9_]+$/.test(cleanNew))
       return safeCb(cb, { message: "Only letters, numbers and underscores allowed" });
     if (data.registeredNames[newLower])
-      return safeCb(cb, { message: "New username already taken" });
+      return safeCb(cb, { message: "New username already in use" });
+
+    // ✅ ========== NEW RULE: PREVENT TAKING OTHERS' PAST NAMES ==========
+    // Find ALL history entries for this new name (case-insensitive)
+    const pastOwners = (data.usernameHistory || [])
+      .filter(entry => entry.oldUsername.toLowerCase() === newLower)
+      .map(entry => entry.userId);
+
+    if (pastOwners.length > 0) {
+      // Get current user's ID
+      const currentUserId = data.accounts[cleanOld]?.id;
+      // Check if current user is the ONLY one who ever owned this name
+      const isOriginalOwner = pastOwners.every(id => id === currentUserId);
+
+      if (!isOriginalOwner) {
+        return safeCb(cb, { 
+          message: "This username was previously used by another account — you cannot claim it." 
+        });
+      }
+    }
+    // ✅ ========== END NEW RULE ==========
+
     if (!data.accounts[cleanOld])
       return safeCb(cb, { message: "Original account not found" });
 
+    // --- Keep all your existing rename logic here ---
     delete data.registeredNames[oldLower];
     data.registeredNames[newLower] = true;
 
@@ -366,19 +389,18 @@ function setupSockets(io) {
       onlineUsers.delete(cleanOld);
     }
 
-    // ✅ NEW: Save to past usernames history
+    // Save to history
     data.usernameHistory.unshift({
       userId: oldAccount.id,
       oldUsername: cleanOld,
       newUsername: cleanNew,
       changedAt: new Date().toISOString()
     });
-    // ✅ END NEW
 
     saveData();
     io.emit("username updated", { oldName: cleanOld, newName: cleanNew });
-
     safeCb(cb, { success: true, newName: cleanNew });
+
   } catch (err) {
     console.error("Change Username Error:", err);
     safeCb(cb, { message: "Failed to change username — please try again" });
