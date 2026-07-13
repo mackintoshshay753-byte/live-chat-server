@@ -13,6 +13,31 @@ if (!data.users) data.users = {};
  * Get single outfit by ID
  * GET /outfits/:id
  */
+
+router.get('/recommended', (req, res) => {
+  const limit = Math.max(1, parseInt(req.query.limit, 10) || 12);
+
+  const recommended = Object.values(data.outfitCatalog)
+    .map(outfit => ({
+      ...outfit,
+      sales: outfit.sales || 0,
+      views: outfit.views || 0,
+      score: ((outfit.sales || 0) * 2) + (outfit.views || 0)
+    }))
+    .sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      if ((b.sales || 0) !== (a.sales || 0)) return (b.sales || 0) - (a.sales || 0);
+      return (b.views || 0) - (a.views || 0);
+    })
+    .slice(0, limit);
+
+  res.json({
+    success: true,
+    count: recommended.length,
+    outfits: recommended
+  });
+});
+
 router.get('/:id', (req, res) => {
   const outfitId = parseInt(req.params.id, 10);
 
@@ -25,7 +50,8 @@ router.get('/:id', (req, res) => {
     return res.status(404).json({ success: false, message: "Outfit not found" });
   }
 
-  // Get creator safely
+  outfit.views = (outfit.views || 0) + 1;
+  saveData().catch(console.error);
   const uploadedBy = outfit.uploadedBy ?? 0;
   const creator = data.users[uploadedBy] || { username: `User ${uploadedBy}` };
 
@@ -85,10 +111,12 @@ router.post('/upload', express.json({ limit: '10mb' }), async (req, res) => {
       id: outfitId,
       name: name.trim(),
       price: numericPrice,
-      head: head,
+      head,
       thumbnail: thumbnail.trim(),
       uploadedBy: uid,
-      uploadedAt: new Date().toISOString()
+      uploadedAt: new Date().toISOString(),
+      sales: 0,
+      views: 0
     };
 
     data.nextOutfitId += 1;

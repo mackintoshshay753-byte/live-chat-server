@@ -67,6 +67,7 @@ router.post('/buy', express.json(), async (req, res) => {
     }
 
     data.userOutfits[uid].owned.push(oid);
+    outfit.sales = (outfit.sales || 0) + 1;
     await saveData();
 
     res.json({ success: true, message: "✅ Outfit added to your inventory" });
