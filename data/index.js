@@ -22,7 +22,7 @@ const DEFAULT_DATA = {
   nextGroupId: 1,
   ads: {},
   nextOutfitId: 8,
-  outfitCatalog: { ...DEFAULT_CATALOG }, // Correct merge now
+  outfitCatalog: { ...DEFAULT_CATALOG },
   userOutfits: {},
 };
 
@@ -32,21 +32,17 @@ const OWNER_USER_ID = 1;
 let isSaving = false;
 let savePending = false;
 
-// Replace your old getDefaultOutfitIdForGender with this:
+// 🎲 Strict gender → random variants (CORRECT IDs now!)
 function getDefaultOutfitIdForGender(gender) {
   const g = String(gender || '').toLowerCase().trim();
-  let options;
   switch (g) {
     case 'male':
-      options = [1, 2];
-      break;
+      return [1, 2][Math.floor(Math.random() * 2)];
     case 'female':
-      options = [3, 4];
-      break;
+      return [3, 4][Math.floor(Math.random() * 2)];
     default:
-      options = [1, 2];
+      return 1;
   }
-  return options[Math.floor(Math.random() * options.length)];
 }
 
 async function loadData() {
@@ -60,11 +56,11 @@ async function loadData() {
     const raw = await fs.readFile(DATA_PATH, 'utf8');
     const loaded = JSON.parse(raw);
     
-    // ✅ Preserve defaults if catalog is missing/old
+    // ✅ Force default catalog entries to never be overwritten by old broken data
     data = {
       ...DEFAULT_DATA,
       ...loaded,
-      outfitCatalog: { ...DEFAULT_CATALOG, ...(loaded.outfitCatalog || {}) }
+      outfitCatalog: { ...(loaded.outfitCatalog || {}), ...DEFAULT_CATALOG }
     };
 
     // Sync roles
@@ -118,6 +114,6 @@ module.exports = {
   get data() { return data; },
   setData: (newData) => { data = newData; },
   loadData, saveData, setRoleOnSignup,
-  getDefaultOutfitIdForGender, // Export for use in signup/admin
+  getDefaultOutfitIdForGender,
   OWNER_USER_ID
 };
