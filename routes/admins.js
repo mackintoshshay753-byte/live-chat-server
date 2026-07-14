@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const bcrypt = require('bcrypt');
-const { data, saveData, OWNER_USER_ID } = require('../data'); // ✅ Import fixed owner ID
+const { data, saveData, OWNER_USER_ID, getDefaultOutfitIdForGender } = require('../data'); // ✅ Import the gender→outfit function
 const { hasRole } = require('./permissions');
 const { assignPermanentDefaultOutfit } = require('../sockets');
 
@@ -28,7 +28,6 @@ const getUsername = account => {
 
 const isSelf = (actorId, targetAcc) => Number(actorId) === Number(targetAcc.id);
 
-// ✅ Fixed: Check owner by ID instead of username
 const isMainOwner = user => {
   if (!user) return false;
   const checkId = typeof user === "object" ? Number(user.id) : Number(user);
@@ -38,8 +37,8 @@ const isMainOwner = user => {
 const canInteract = (actor, targetAcc) => {
   if (!actor || !targetAcc) return false;
   if (isSelf(actor.id, targetAcc)) return false;
-  if (isMainOwner(targetAcc)) return false; // Can never modify ID 1
-  if (isMainOwner(actor)) return true; // ID 1 can modify anyone
+  if (isMainOwner(targetAcc)) return false;
+  if (isMainOwner(actor)) return true;
   return RANKS[actor.role] > RANKS[targetAcc.role];
 };
 
@@ -77,11 +76,9 @@ router.post('/set-role', (req, res) => {
     if (!actor || !targetAcc) return res.status(404).json({ success: false, error: "User not found" });
     if (!canInteract(actor, targetAcc)) return res.status(403).json({ success: false, error: "You cannot modify this account" });
     
-    // ✅ Prevent removing owner from ID 1 entirely
     if (Number(targetAcc.id) === OWNER_USER_ID && role !== "owner") {
       return res.status(403).json({ success: false, error: "Cannot remove owner role from the main account" });
     }
-    // Prevent removing the last owner
     if (targetAcc.role === "owner" && role !== "owner") {
       const ownerCount = Object.values(data.accounts).filter(a => a.role === "owner").length;
       if (ownerCount <= 1) return res.status(403).json({ success: false, error: "Cannot remove the only owner" });
@@ -272,8 +269,10 @@ router.post('/create-account', async (req, res) => {
       actorId, username, password, role = "user", gender = "", birthday = "",
       customHead, customThumbnail
     } = req.body;
+
+    // ✅ Fixed: Only require core fields, allow custom avatars to be empty
     if (!actorId || !username || !password || !gender || !birthday) 
-      return res.status(400).json({ success: false, error: "All fields are required" });
+      return res.status(400).json({ success: false, error: "All required fields are needed" });
 
     const actor = resolveTarget(actorId);
     if (!actor || !isMainOwner(actor)) 
@@ -335,14 +334,15 @@ router.post('/create-account', async (req, res) => {
     data.registeredNames[lower] = clean;
     data.usernameToId[clean] = newId;
 
+    // ✅ Fixed: Accept base64 strings directly, no trim() crash on null
     if (customHead && customThumbnail) {
       const customOutfitId = data.nextOutfitId;
       data.outfitCatalog[customOutfitId] = {
         id: customOutfitId,
         name: `Custom: ${clean}`,
         price: 0,
-        head: customHead.trim(),
-        thumbnail: customThumbnail.trim(),
+        head: customHead, // ✅ Removed .trim() to avoid crash on base64 data
+        thumbnail: customThumbnail, // ✅ Removed .trim()
         uploadedBy: OWNER_USER_ID,
         uploadedAt: joinDate,
         sales: 1,
@@ -354,6 +354,7 @@ router.post('/create-account', async (req, res) => {
       data.userOutfits[newId].owned.push(customOutfitId);
       data.userOutfits[newId].equipped = customOutfitId;
     } else {
+      // ✅ Ensure default assignment works with the correct gender logic
       await assignPermanentDefaultOutfit(newId, gender);
     }
 
@@ -370,8 +371,8 @@ router.post('/create-account', async (req, res) => {
     await saveData();
     res.json({ success: true, accountId: newId, username: clean, role: finalRole });
   } catch (err) {
-    console.error("Create account error:", err);
-    res.status(500).json({ success: false, error: "Server error creating account" });
+    console.error("❌ Create account full error:", err); // ✅ Log full error for debugging
+    res.status(500).json({ success: false, error: "Server error creating account", details: err.message });
   }
 });
 
