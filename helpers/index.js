@@ -1,5 +1,5 @@
 const sanitizeHtml = require('sanitize-html');
-const bcrypt = require('bcrypt'); // ✅ Make sure bcrypt is imported
+const bcrypt = require('bcrypt');
 const { data, saveData, setRoleOnSignup } = require('../data');
 const toxicity = require('@tensorflow-models/toxicity');
 
@@ -28,7 +28,6 @@ function clean(input) {
   return sanitizeHtml(String(input || '').trim(), { allowedTags: [], allowedAttributes: {} });
 }
 
-// ✅ UPDATED: Now accepts password and saves hash
 async function createProfile(username, password) {
   const cleanedUsername = clean(username);
   if (!cleanedUsername) return { success: false, message: "Username required" };
@@ -39,14 +38,14 @@ async function createProfile(username, password) {
   const bad = await isInappropriate(cleanedUsername);
   if (bad) return { success: false, message: "Username is not appropriate" };
 
-  // Hash password securely
   const hashedPassword = await bcrypt.hash(password, 10);
 
-  // Get correct role
-  const userRole = setRoleOnSignup(cleanedUsername);
+  // ✅ Get NEW ID FIRST, then pass ID to setRoleOnSignup
+  const newUserId = data.nextUserId;
+  const userRole = setRoleOnSignup(newUserId);
 
   const profile = {
-    id: data.nextUserId++,
+    id: newUserId,
     username: cleanedUsername,
     joinDate: new Date().toISOString(),
     lastOnline: new Date().toISOString(),
@@ -58,7 +57,6 @@ async function createProfile(username, password) {
     role: userRole
   };
 
-  // ✅ Save ALL required fields to accounts: id, hash, role
   data.userProfiles[cleanedUsername] = profile;
   data.accounts[cleanedUsername] = {
     id: profile.id,
@@ -68,6 +66,7 @@ async function createProfile(username, password) {
   data.registeredNames[cleanedUsername] = true;
   data.usernameToId[cleanedUsername] = profile.id;
 
+  data.nextUserId++; // ✅ Increment only after assigning ID
   saveData();
   return { success: true, user: profile };
 }
