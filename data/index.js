@@ -21,16 +21,27 @@ const DEFAULT_DATA = {
   groups: [],
   nextGroupId: 1,
   ads: {},
-  nextOutfitId: 31, // Matches your highest catalog ID +1
-  outfitCatalog: { ...DEFAULT_CATALOG },
+  nextOutfitId: 6,
+  outfitCatalog: { ...DEFAULT_CATALOG }, // Correct merge now
   userOutfits: {},
 };
 
 let data = { ...DEFAULT_DATA };
-const OWNER_USER_ID = 1; // ✅ Owner is fixed to ID 1 forever
+const OWNER_USER_ID = 1;
 
 let isSaving = false;
 let savePending = false;
+
+// ✅ EXACT MAPPING: Gender → Default Outfit ID
+function getDefaultOutfitIdForGender(gender) {
+  const g = String(gender || '').toLowerCase().trim();
+  switch (g) {
+    case 'male': return 1;   // Matches your Default Male ID
+    case 'female': return 2; // Matches your Default Female ID
+    case 'other':
+    default: return 1;       // Safe fallback
+  }
+}
 
 async function loadData() {
   try {
@@ -43,15 +54,20 @@ async function loadData() {
     const raw = await fs.readFile(DATA_PATH, 'utf8');
     const loaded = JSON.parse(raw);
     
-    data = { ...DEFAULT_DATA, ...loaded };
+    // ✅ Preserve defaults if catalog is missing/old
+    data = {
+      ...DEFAULT_DATA,
+      ...loaded,
+      outfitCatalog: { ...DEFAULT_CATALOG, ...(loaded.outfitCatalog || {}) }
+    };
 
-    // Sync roles from userProfiles into accounts
+    // Sync roles
     Object.entries(data.userProfiles || {}).forEach(([uname, prof]) => {
       if (!data.accounts[uname]) data.accounts[uname] = { id: prof.id };
       data.accounts[uname].role = prof.role || "user";
     });
 
-    // ✅ Force OWNER role for User ID 1 (always works, even if username changes)
+    // Force Owner for ID 1
     const ownerProfile = Object.values(data.userProfiles || {}).find(p => Number(p.id) === OWNER_USER_ID);
     if (ownerProfile) {
       if (ownerProfile.role !== "owner") {
@@ -63,47 +79,31 @@ async function loadData() {
         console.log(`✅ User ID ${OWNER_USER_ID} set as Owner`);
       }
     } else {
-      console.log(`ℹ️ First registered user will get ID ${OWNER_USER_ID} and Owner role`);
+      console.log(`ℹ️ First registered user gets ID ${OWNER_USER_ID} + Owner role`);
     }
 
     console.log("✅ Data loaded successfully");
   } catch (err) {
-    console.error("⚠️ Data corruption/error detected — backing up and restarting fresh:", err.message);
-    
-    if (existsSync(DATA_PATH)) {
-      renameSync(DATA_PATH, `${DATA_PATH}.bak-${Date.now()}.json`);
-    }
-    
+    console.error("⚠️ Corruption detected — resetting:", err.message);
+    if (existsSync(DATA_PATH)) renameSync(DATA_PATH, `${DATA_PATH}.bak-${Date.now()}.json`);
     data = { ...DEFAULT_DATA };
     await saveData();
   }
 }
 
 async function saveData() {
-  if (isSaving) {
-    savePending = true;
-    return;
-  }
-  
+  if (isSaving) { savePending = true; return; }
   isSaving = true;
-
   try {
-    const payload = JSON.stringify(data, null, 2);
-    await fs.writeFile(TEMP_DATA_PATH, payload, 'utf8');
+    await fs.writeFile(TEMP_DATA_PATH, JSON.stringify(data, null, 2), 'utf8');
     await fs.rename(TEMP_DATA_PATH, DATA_PATH);
-  } catch (err) {
-    console.error("❌ Save failed:", err.message);
-  } finally {
+  } catch (err) { console.error("❌ Save failed:", err.message); }
+  finally {
     isSaving = false;
-    
-    if (savePending) {
-      savePending = false;
-      await saveData();
-    }
+    if (savePending) { savePending = false; await saveData(); }
   }
 }
 
-// ✅ Assign Owner role to anyone registering with ID 1
 function setRoleOnSignup(userId, role = "user") {
   return Number(userId) === OWNER_USER_ID ? "owner" : role;
 }
@@ -111,8 +111,7 @@ function setRoleOnSignup(userId, role = "user") {
 module.exports = { 
   get data() { return data; },
   setData: (newData) => { data = newData; },
-  loadData, 
-  saveData, 
-  setRoleOnSignup,
+  loadData, saveData, setRoleOnSignup,
+  getDefaultOutfitIdForGender, // Export for use in signup/admin
   OWNER_USER_ID
 };

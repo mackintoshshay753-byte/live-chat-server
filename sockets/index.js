@@ -1,5 +1,5 @@
 const bcrypt = require('bcrypt');
-const { data, saveData } = require('../data');
+const { data, saveData, getDefaultOutfitIdForGender } = require('../data'); // Import the mapping function
 const { clean, createProfile } = require('../helpers');
 
 const onlineUsers = new Map();
@@ -57,14 +57,16 @@ function safeCb(cb, response = {}) {
   }
 }
 
-// --- PERMANENT DEFAULT OUTFIT ASSIGNMENT ---
+// --- ✅ FIXED: STRICT GENDER → OUTFIT MAPPING ---
 async function assignPermanentDefaultOutfit(userId, gender) {
   userId = Number(userId);
   if (!userId) return;
 
-  // Pick random matching variant
-  const variantIds = gender === "Female" ? [3, 4] : [1, 2];
-  const chosenOutfitId = variantIds[Math.floor(Math.random() * variantIds.length)];
+  // Convert to lowercase to match your mapping function
+  const normalizedGender = String(gender || '').toLowerCase().trim();
+  
+  // Get EXACT fixed ID from your data.js mapping (NO randomness!)
+  const chosenOutfitId = getDefaultOutfitIdForGender(normalizedGender);
 
   // Initialize user outfit data if missing
   if (!data.userOutfits[userId]) {
@@ -76,12 +78,14 @@ async function assignPermanentDefaultOutfit(userId, gender) {
     // Add to owned list if not already there
     if (!data.userOutfits[userId].owned.includes(chosenOutfitId)) {
       data.userOutfits[userId].owned.push(chosenOutfitId);
-      data.outfitCatalog[chosenOutfitId].sales = (data.outfitCatalog[chosenOutfitId].sales || 0) + 1;
+      if (data.outfitCatalog[chosenOutfitId]) {
+        data.outfitCatalog[chosenOutfitId].sales = (data.outfitCatalog[chosenOutfitId].sales || 0) + 1;
+      }
     }
     // Lock this as their permanent default
     data.userOutfits[userId].equipped = chosenOutfitId;
     await saveData();
-    console.log(`✅ Assigned permanent outfit ${chosenOutfitId} to user ${userId} (${gender})`);
+    console.log(`✅ Assigned outfit ${chosenOutfitId} (${normalizedGender}) to user ${userId}`);
   }
 }
 
@@ -261,7 +265,6 @@ function setupSockets(io) {
           return safeCb(cb, { message: "Username already taken" });
         }
 
-        // ✅ BLOCK NAMES PREVIOUSLY USED BY ANYONE ELSE (CASE‑INSENSITIVE)
         const pastOwners = (data.usernameHistory || [])
           .filter(entry => entry.oldUsername.toLowerCase() === lower);
 
@@ -309,7 +312,10 @@ function setupSockets(io) {
 
         const id = r.user.id;
         data.registeredNames[lower] = true;
+        
+        // ✅ Now uses fixed mapping: Male → ID1, Female → ID2
         await assignPermanentDefaultOutfit(id, gender);
+        
         if (data.accounts[name]) {
           data.accounts[name].joinDate = new Date().toISOString();
           data.accounts[name].theme = "light";
@@ -360,7 +366,6 @@ function setupSockets(io) {
         if (data.registeredNames[newLower])
           return safeCb(cb, { message: "New username already in use" });
 
-        // ✅ ONLY ORIGINAL OWNER CAN RECLAIM OLD NAMES
         const pastOwners = (data.usernameHistory || [])
           .filter(entry => entry.oldUsername.toLowerCase() === newLower)
           .map(entry => entry.userId);
