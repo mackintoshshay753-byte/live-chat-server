@@ -14,7 +14,7 @@ function findUserById(id) {
 router.get('/recommended', (req, res) => {
   const limit = Math.max(1, parseInt(req.query.limit) || 12);
   const outfits = Object.values(data.outfitCatalog)
-    .filter(o => o.id > 2) // Keep defaults internal only
+    .filter(o => o.id > 4) // Keep defaults internal only
     .map(o => ({
       ...o,
       creatorId: o.uploadedBy || 0,
@@ -38,7 +38,7 @@ router.get('/:id', (req, res) => {
 });
 
 router.get('/', (req, res) => {
-  const catalog = Object.values(data.outfitCatalog).filter(o => o.id > 2);
+  const catalog = Object.values(data.outfitCatalog).filter(o => o.id > 4);
   res.json({ success: true, count: catalog.length, catalog });
 });
 

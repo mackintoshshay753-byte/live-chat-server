@@ -57,35 +57,28 @@ function safeCb(cb, response = {}) {
   }
 }
 
-// --- ✅ FIXED: STRICT GENDER → OUTFIT MAPPING ---
 async function assignPermanentDefaultOutfit(userId, gender) {
   userId = Number(userId);
   if (!userId) return;
 
-  // Convert to lowercase to match your mapping function
-  const normalizedGender = String(gender || '').toLowerCase().trim();
-  
-  // Get EXACT fixed ID from your data.js mapping (NO randomness!)
-  const chosenOutfitId = getDefaultOutfitIdForGender(normalizedGender);
+  // Get random valid ID for this gender
+  const chosenOutfitId = getDefaultOutfitIdForGender(gender);
 
-  // Initialize user outfit data if missing
   if (!data.userOutfits[userId]) {
     data.userOutfits[userId] = { equipped: null, owned: [] };
   }
 
-  // ONLY assign if no outfit is equipped — NEVER overwrite later
+  // Only assign once — never overwrite later
   if (!data.userOutfits[userId].equipped) {
-    // Add to owned list if not already there
     if (!data.userOutfits[userId].owned.includes(chosenOutfitId)) {
       data.userOutfits[userId].owned.push(chosenOutfitId);
       if (data.outfitCatalog[chosenOutfitId]) {
         data.outfitCatalog[chosenOutfitId].sales = (data.outfitCatalog[chosenOutfitId].sales || 0) + 1;
       }
     }
-    // Lock this as their permanent default
     data.userOutfits[userId].equipped = chosenOutfitId;
     await saveData();
-    console.log(`✅ Assigned outfit ${chosenOutfitId} (${normalizedGender}) to user ${userId}`);
+    console.log(`✅ Assigned ${gender} variant ${chosenOutfitId} to user ${userId}`);
   }
 }
 

@@ -21,7 +21,7 @@ const DEFAULT_DATA = {
   groups: [],
   nextGroupId: 1,
   ads: {},
-  nextOutfitId: 6,
+  nextOutfitId: 8,
   outfitCatalog: { ...DEFAULT_CATALOG }, // Correct merge now
   userOutfits: {},
 };
@@ -32,15 +32,21 @@ const OWNER_USER_ID = 1;
 let isSaving = false;
 let savePending = false;
 
-// ✅ EXACT MAPPING: Gender → Default Outfit ID
+// Replace your old getDefaultOutfitIdForGender with this:
 function getDefaultOutfitIdForGender(gender) {
   const g = String(gender || '').toLowerCase().trim();
+  let options;
   switch (g) {
-    case 'male': return 1;   // Matches your Default Male ID
-    case 'female': return 2; // Matches your Default Female ID
-    case 'other':
-    default: return 1;       // Safe fallback
+    case 'male':
+      options = [1, 2];
+      break;
+    case 'female':
+      options = [3, 4];
+      break;
+    default:
+      options = [1, 2];
   }
+  return options[Math.floor(Math.random() * options.length)];
 }
 
 async function loadData() {
