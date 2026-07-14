@@ -1,16 +1,11 @@
 const express = require('express');
 const router = express.Router();
 const bcrypt = require('bcrypt');
-const { data, saveData, OWNER_USER_ID } = require('../data'); // ✅ Removed unused import
+const { data, saveData, OWNER_USER_ID } = require('../data'); // ✅ Import fixed owner ID
 const { hasRole } = require('./permissions');
 const { assignPermanentDefaultOutfit } = require('../sockets');
 
 if (!data.deletedAccounts) data.deletedAccounts = {};
-// ✅ Initialize missing required data structures if they don't exist
-if (!data.outfitCatalog) data.outfitCatalog = {};
-if (!data.userOutfits) data.userOutfits = {};
-if (!data.nextOutfitId) data.nextOutfitId = 1;
-if (!data.moderationLogs) data.moderationLogs = [];
 
 const RANKS = { user: 0, moderator: 1, admin: 2, owner: 3 };
 
@@ -33,6 +28,7 @@ const getUsername = account => {
 
 const isSelf = (actorId, targetAcc) => Number(actorId) === Number(targetAcc.id);
 
+// ✅ Fixed: Check owner by ID instead of username
 const isMainOwner = user => {
   if (!user) return false;
   const checkId = typeof user === "object" ? Number(user.id) : Number(user);
@@ -42,8 +38,8 @@ const isMainOwner = user => {
 const canInteract = (actor, targetAcc) => {
   if (!actor || !targetAcc) return false;
   if (isSelf(actor.id, targetAcc)) return false;
-  if (isMainOwner(targetAcc)) return false;
-  if (isMainOwner(actor)) return true;
+  if (isMainOwner(targetAcc)) return false; // Can never modify ID 1
+  if (isMainOwner(actor)) return true; // ID 1 can modify anyone
   return RANKS[actor.role] > RANKS[targetAcc.role];
 };
 
@@ -81,9 +77,11 @@ router.post('/set-role', (req, res) => {
     if (!actor || !targetAcc) return res.status(404).json({ success: false, error: "User not found" });
     if (!canInteract(actor, targetAcc)) return res.status(403).json({ success: false, error: "You cannot modify this account" });
     
+    // ✅ Prevent removing owner from ID 1 entirely
     if (Number(targetAcc.id) === OWNER_USER_ID && role !== "owner") {
       return res.status(403).json({ success: false, error: "Cannot remove owner role from the main account" });
     }
+    // Prevent removing the last owner
     if (targetAcc.role === "owner" && role !== "owner") {
       const ownerCount = Object.values(data.accounts).filter(a => a.role === "owner").length;
       if (ownerCount <= 1) return res.status(403).json({ success: false, error: "Cannot remove the only owner" });
@@ -274,9 +272,8 @@ router.post('/create-account', async (req, res) => {
       actorId, username, password, role = "user", gender = "", birthday = "",
       customHead, customThumbnail
     } = req.body;
-
     if (!actorId || !username || !password || !gender || !birthday) 
-      return res.status(400).json({ success: false, error: "All required fields are needed" });
+      return res.status(400).json({ success: false, error: "All fields are required" });
 
     const actor = resolveTarget(actorId);
     if (!actor || !isMainOwner(actor)) 
@@ -294,7 +291,7 @@ router.post('/create-account', async (req, res) => {
 
     const finalRole = ["user", "moderator", "admin", "owner"].includes(role) ? role : "user";
 
-    let newId = data.nextUserId || 1000; // ✅ Fallback if nextUserId is missing
+    let newId = data.nextUserId;
     while (Object.values(data.accounts).some(a => Number(a.id) === newId) || Object.values(data.deletedAccounts).some(d => Number(d.account.id) === newId)) newId++;
     data.nextUserId = newId + 1;
 
@@ -338,15 +335,14 @@ router.post('/create-account', async (req, res) => {
     data.registeredNames[lower] = clean;
     data.usernameToId[clean] = newId;
 
-    // ✅ Safe custom avatar handling
     if (customHead && customThumbnail) {
       const customOutfitId = data.nextOutfitId;
       data.outfitCatalog[customOutfitId] = {
         id: customOutfitId,
         name: `Custom: ${clean}`,
         price: 0,
-        head: customHead,
-        thumbnail: customThumbnail,
+        head: customHead.trim(),
+        thumbnail: customThumbnail.trim(),
         uploadedBy: OWNER_USER_ID,
         uploadedAt: joinDate,
         sales: 1,
@@ -358,8 +354,7 @@ router.post('/create-account', async (req, res) => {
       data.userOutfits[newId].owned.push(customOutfitId);
       data.userOutfits[newId].equipped = customOutfitId;
     } else {
-      // ✅ Ensure gender is lowercase for matching your outfit function
-      await assignPermanentDefaultOutfit(newId, gender.toLowerCase());
+      await assignPermanentDefaultOutfit(newId, gender);
     }
 
     data.moderationLogs.push({ 
@@ -375,8 +370,8 @@ router.post('/create-account', async (req, res) => {
     await saveData();
     res.json({ success: true, accountId: newId, username: clean, role: finalRole });
   } catch (err) {
-    console.error("❌ FULL Create Account Error:", err); // ✅ Shows exact error in console
-    res.status(500).json({ success: false, error: "Server error creating account", details: err.message });
+    console.error("Create account error:", err);
+    res.status(500).json({ success: false, error: "Server error creating account" });
   }
 });
 
