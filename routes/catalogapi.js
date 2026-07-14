@@ -1,7 +1,6 @@
 const express = require('express');
 const router = express.Router();
 const { data, saveData } = require('../data');
-const SPECIALS = require('../special-avatars'); // ✅ Added
 
 const ALLOWED_UPLOAD_IDS = [1];
 
@@ -11,56 +10,43 @@ if (!data.users) data.users = {};
 
 function findUserById(userId) {
   if (!userId) return null;
+
   const id = Number(userId);
-  return Object.values(data.userProfiles || {}).find(u => Number(u.id) === id) || null;
+
+  return Object.values(data.userProfiles || {}).find(u =>
+    Number(u.id) === id
+  ) || null;
 }
 
-function applySpecial(outfit, userId, username = "") {
-  const uid = Number(userId);
+router.get('/recommended',(req,res)=>{
+  const limit=Math.max(1,parseInt(req.query.limit)||12);
 
-  // 1. ID ALWAYS wins — check first
-  const idMatch = SPECIALS.byId[uid];
-  if (idMatch) return { ...outfit, ...idMatch };
+  const outfits=Object.values(data.outfitCatalog)
+    .map(o=>{
+      const u=findUserById(o.uploadedBy);
 
-  // 2. Only if NO ID match — check username (works for ANY ID)
-  if (username) {
-    const nameMatch = SPECIALS.byUsername[username.toLowerCase()];
-    if (nameMatch) return { ...outfit, ...nameMatch };
-  }
-
-  // 3. No match — return original outfit
-  return outfit;
-}
-
-router.get('/recommended', (req, res) => {
-  const limit = Math.max(1, parseInt(req.query.limit) || 12);
-  const viewerId = req.query.viewerId;
-  const viewerUsername = req.query.viewerUsername || "";
-
-  const outfits = Object.values(data.outfitCatalog)
-    .map(o => {
-      const u = findUserById(o.uploadedBy);
-      const base = {
+      return {
         ...o,
-        creatorId: o.uploadedBy || 0,
-        creatorName: u?.username || "Unknown",
-        creatorUrl: `/users/profile?id=${o.uploadedBy || 0}`,
-        sales: o.sales || 0,
-        views: o.views || 0,
-        score: (o.sales || 0) * 2 + (o.views || 0)
+        creatorId:o.uploadedBy || 0,
+        creatorName:u?.username || "Unknown",
+        creatorUrl:`/users/profile?id=${o.uploadedBy || 0}`,
+        sales:o.sales||0,
+        views:o.views||0,
+        score:(o.sales||0)*2+(o.views||0)
       };
-      return applySpecial(base, viewerId, viewerUsername);
     })
-    .sort((a, b) => b.score - a.score || b.sales - a.sales || b.views - a.views)
-    .slice(0, limit);
+    .sort((a,b)=>b.score-a.score||b.sales-a.sales||b.views-a.views)
+    .slice(0,limit);
 
-  res.json({ success: true, count: outfits.length, outfits });
+  res.json({
+    success:true,
+    count:outfits.length,
+    outfits
+  });
 });
 
 router.get('/:id', (req, res) => {
   const outfitId = parseInt(req.params.id, 10);
-  const viewerId = req.query.viewerId;
-  const viewerUsername = req.query.viewerUsername || "";
 
   if (isNaN(outfitId) || outfitId < 1) {
     return res.status(400).json({ success: false, message: "Invalid outfit ID" });
@@ -76,30 +62,27 @@ router.get('/:id', (req, res) => {
   
   const uploadedBy = outfit.uploadedBy ?? 0;
   const creator = findUserById(uploadedBy) || {};
-  const finalOutfit = applySpecial(outfit, viewerId, viewerUsername);
 
   res.json({
     success: true,
     outfit: {
-      id: finalOutfit.id,
-      name: finalOutfit.name,
-      price: finalOutfit.price,
-      thumbnailUrl: finalOutfit.thumbnail,
-      head: finalOutfit.head,
+      id: outfit.id,
+      name: outfit.name,
+      price: outfit.price,
+      thumbnailUrl: outfit.thumbnail,
+      head: outfit.head,
       creatorId: uploadedBy,
       creatorName: creator.username || "Unknown",
       creatorUrl: `/users/profile?id=${uploadedBy}`,
-      uploadedAt: finalOutfit.uploadedAt || null,
-      sales: finalOutfit.sales || 0,
-      views: finalOutfit.views || 0
+      uploadedAt: outfit.uploadedAt || null,
+      sales: outfit.sales || 0,
+      views: outfit.views || 0
     }
   });
 });
 
 router.get('/', (req, res) => {
-  const viewerId = req.query.viewerId;
-  const viewerUsername = req.query.viewerUsername || "";
-  const catalogArray = Object.values(data.outfitCatalog).map(o => applySpecial(o, viewerId, viewerUsername));
+  const catalogArray = Object.values(data.outfitCatalog);
   res.json({ success: true, count: catalogArray.length, catalog: catalogArray });
 });
 
@@ -122,6 +105,7 @@ router.post('/upload', express.json({ limit: '10mb' }), async (req, res) => {
     }
 
     const outfitId = data.nextOutfitId;
+
     data.outfitCatalog[outfitId] = {
       id: outfitId,
       name: name.trim(),
@@ -133,10 +117,16 @@ router.post('/upload', express.json({ limit: '10mb' }), async (req, res) => {
       sales: 0,
       views: 0
     };
+
     data.nextOutfitId += 1;
     await saveData();
 
-    res.status(201).json({ success: true, message: "✅ Outfit saved successfully", outfitId });
+    res.status(201).json({
+      success: true,
+      message: "✅ Outfit saved successfully",
+      outfitId
+    });
+
   } catch (err) {
     console.error("Upload error:", err);
     res.status(500).json({ success: false, message: "Failed to save outfit" });

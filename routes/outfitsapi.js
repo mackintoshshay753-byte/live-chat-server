@@ -1,37 +1,18 @@
 const express = require('express');
 const router = express.Router();
 const { data, saveData } = require('../data');
-const SPECIALS = require('../special-avatars'); // ✅ Added
 
 // Ensure base structures exist
 if (!data.userOutfits) data.userOutfits = {};
 if (!data.outfitCatalog) data.outfitCatalog = {};
 
-function applySpecial(outfit, userId, username = "") {
-  const uid = Number(userId);
-
-  // 1. ID ALWAYS wins — check first
-  const idMatch = SPECIALS.byId[uid];
-  if (idMatch) return { ...outfit, ...idMatch };
-
-  // 2. Only if NO ID match — check username (works for ANY ID)
-  if (username) {
-    const nameMatch = SPECIALS.byUsername[username.toLowerCase()];
-    if (nameMatch) return { ...outfit, ...nameMatch };
-  }
-
-  // 3. No match — return original outfit
-  return outfit;
-}
-
 /**
  * GET - Fetch all outfits a user owns + equipped
- * Query: ?userId=X&username=Y
+ * Query: ?userId=X
  */
 router.get('/my', async (req, res) => {
   try {
     const userId = parseInt(req.query.userId);
-    const username = req.query.username || "";
     if (isNaN(userId) || userId <= 0) {
       return res.status(400).json({ success: false, message: "Valid user ID is required" });
     }
@@ -43,20 +24,12 @@ router.get('/my', async (req, res) => {
 
     const userData = data.userOutfits[userId];
     const ownedOutfits = userData.owned
-      .map(outfitId => {
-        const base = data.outfitCatalog[outfitId];
-        return base ? applySpecial(base, userId, username) : null;
-      })
+      .map(outfitId => data.outfitCatalog[outfitId])
       .filter(Boolean);
-
-    // Apply special to equipped outfit too
-    let equippedOutfit = userData.equipped ? data.outfitCatalog[userData.equipped] : null;
-    if (equippedOutfit) equippedOutfit = applySpecial(equippedOutfit, userId, username);
 
     res.json({
       success: true,
       equipped: userData.equipped,
-      equippedOutfit,
       outfits: ownedOutfits
     });
 
