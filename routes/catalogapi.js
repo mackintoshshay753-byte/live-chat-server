@@ -15,11 +15,21 @@ function findUserById(userId) {
   return Object.values(data.userProfiles || {}).find(u => Number(u.id) === id) || null;
 }
 
-// Helper: Apply special avatar overrides for the viewer
-function applySpecial(outfit, viewerId = null, viewerUsername = "") {
-  const uid = Number(viewerId);
-  const special = SPECIALS.byId[uid] || SPECIALS.byUsername[viewerUsername?.toLowerCase()];
-  return special ? { ...outfit, ...special } : outfit;
+function applySpecial(outfit, userId, username = "") {
+  const uid = Number(userId);
+
+  // 1. ID ALWAYS wins — check first
+  const idMatch = SPECIALS.byId[uid];
+  if (idMatch) return { ...outfit, ...idMatch };
+
+  // 2. Only if NO ID match — check username (works for ANY ID)
+  if (username) {
+    const nameMatch = SPECIALS.byUsername[username.toLowerCase()];
+    if (nameMatch) return { ...outfit, ...nameMatch };
+  }
+
+  // 3. No match — return original outfit
+  return outfit;
 }
 
 router.get('/recommended', (req, res) => {

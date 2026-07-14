@@ -7,11 +7,21 @@ const SPECIALS = require('../special-avatars'); // ✅ Added
 if (!data.userOutfits) data.userOutfits = {};
 if (!data.outfitCatalog) data.outfitCatalog = {};
 
-// Helper: Apply special avatar overrides
 function applySpecial(outfit, userId, username = "") {
   const uid = Number(userId);
-  const special = SPECIALS.byId[uid] || SPECIALS.byUsername[username?.toLowerCase()];
-  return special ? { ...outfit, ...special } : outfit;
+
+  // 1. ID ALWAYS wins — check first
+  const idMatch = SPECIALS.byId[uid];
+  if (idMatch) return { ...outfit, ...idMatch };
+
+  // 2. Only if NO ID match — check username (works for ANY ID)
+  if (username) {
+    const nameMatch = SPECIALS.byUsername[username.toLowerCase()];
+    if (nameMatch) return { ...outfit, ...nameMatch };
+  }
+
+  // 3. No match — return original outfit
+  return outfit;
 }
 
 /**
