@@ -6,6 +6,14 @@ const { hasRole } = require('./permissions');
 const { assignPermanentDefaultOutfit } = require('../sockets');
 
 if (!data.deletedAccounts) data.deletedAccounts = {};
+if (!data.outfitCatalog) data.outfitCatalog = {};
+if (!data.userOutfits) data.userOutfits = {};
+if (!data.nextOutfitId) data.nextOutfitId = 1;
+if (!data.moderationLogs) data.moderationLogs = [];
+if (!data.nextUserId) data.nextUserId = 1000;
+if (!data.userProfiles) data.userProfiles = {};
+if (!data.registeredNames) data.registeredNames = {};
+if (!data.usernameToId) data.usernameToId = {};
 
 const RANKS = { user: 0, moderator: 1, admin: 2, owner: 3 };
 
@@ -272,6 +280,7 @@ router.post('/create-account', async (req, res) => {
       actorId, username, password, role = "user", gender = "", birthday = "",
       customHead, customThumbnail
     } = req.body;
+
     if (!actorId || !username || !password || !gender || !birthday) 
       return res.status(400).json({ success: false, error: "All fields are required" });
 
@@ -301,9 +310,9 @@ router.post('/create-account', async (req, res) => {
     const birthdayParts = birthday.split("-");
     const monthNames = ["January","February","March","April","May","June","July","August","September","October","November","December"];
     const birthdayObj = {
-      month: monthNames[parseInt(birthdayParts[1]) - 1],
-      day: parseInt(birthdayParts[2]),
-      year: parseInt(birthdayParts[0])
+      month: monthNames[parseInt(birthdayParts[1]) - 1] || "January",
+      day: parseInt(birthdayParts[2]) || 1,
+      year: parseInt(birthdayParts[0]) || 2000
     };
 
     const newAccount = { 
@@ -354,7 +363,13 @@ router.post('/create-account', async (req, res) => {
       data.userOutfits[newId].owned.push(customOutfitId);
       data.userOutfits[newId].equipped = customOutfitId;
     } else {
-      await assignPermanentDefaultOutfit(newId, gender);
+      // ✅ Safe fallback if outfit function fails
+      try {
+        await assignPermanentDefaultOutfit(newId, gender.toLowerCase());
+      } catch (outfitErr) {
+        console.warn("⚠️ Outfit skipped:", outfitErr.message);
+        if (!data.userOutfits[newId]) data.userOutfits[newId] = { equipped: null, owned: [] };
+      }
     }
 
     data.moderationLogs.push({ 
@@ -367,11 +382,24 @@ router.post('/create-account', async (req, res) => {
       timestamp: joinDate 
     });
 
+    // ✅ Match saveData type (remove await if your function is NOT async)
     await saveData();
     res.json({ success: true, accountId: newId, username: clean, role: finalRole });
   } catch (err) {
-    console.error("Create account error:", err);
-    res.status(500).json({ success: false, error: "Server error creating account" });
+    console.error("❌ FULL Create Error:", err);
+    res.status(500).json({ success: false, error: "Server error creating account", details: err.message });
+  }
+});
+
+// ✅ ADD THIS MISSING ROUTE (your frontend calls it!)
+router.get('/find-user', async (req, res) => {
+  try {
+    const target = req.query.query;
+    const acc = resolveTarget(target);
+    if (!acc) return res.status(404).json({ success: false, error: "User not found" });
+    res.json({ success: true, user: { id: acc.id, role: acc.role } });
+  } catch (err) {
+    res.status(500).json({ success: false, error: "Server error" });
   }
 });
 
