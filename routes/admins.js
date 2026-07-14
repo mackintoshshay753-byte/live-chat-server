@@ -1,117 +1,79 @@
 const express = require('express');
 const router = express.Router();
-const bcrypt = require('bcrypt');
-const { data, saveData, OWNER_USER_ID } = require('../data'); // ✅ Import fixed owner ID
-const { hasRole } = require('./permissions');
-const { assignPermanentDefaultOutfit } = require('../sockets');
+const bcrypt = require('bcryptjs');
+const { data, saveData, OWNER_USER_ID, getDefaultOutfitIdForGender } = require('../data');
 
-if (!data.deletedAccounts) data.deletedAccounts = {};
-if (!data.outfitCatalog) data.outfitCatalog = {};
-if (!data.userOutfits) data.userOutfits = {};
-if (!data.nextOutfitId) data.nextOutfitId = 1;
-if (!data.moderationLogs) data.moderationLogs = [];
-if (!data.nextUserId) data.nextUserId = 1000;
-if (!data.userProfiles) data.userProfiles = {};
-if (!data.registeredNames) data.registeredNames = {};
-if (!data.usernameToId) data.usernameToId = {};
+// --- Helper Functions ---
+function resolveTarget(target) {
+  const trimmed = String(target || '').trim();
+  if (!trimmed) return null;
 
-const RANKS = { user: 0, moderator: 1, admin: 2, owner: 3 };
+  // Match by user ID
+  if (/^\d+$/.test(trimmed)) {
+    const byId = Object.values(data.userProfiles).find(p => String(p.id) === trimmed);
+    if (byId) return { id: byId.id, username: byId.username, role: data.accounts[byId.username]?.role || 'user' };
+  }
 
-const resolveTarget = input => {
-  if (!input) return null;
-  const numId = Number(input);
-  return !isNaN(numId) ? Object.values(data.accounts).find(a => Number(a.id) === numId) || null : data.accounts[String(input)] || null;
-};
+  // Match by username
+  const lower = trimmed.toLowerCase();
+  if (data.usernameToId[lower]) {
+    const uid = data.usernameToId[lower];
+    const prof = data.userProfiles[uid];
+    return { id: uid, username: prof.username, role: data.accounts[prof.username]?.role || 'user' };
+  }
 
-const resolveDeletedTarget = input => {
-  if (!input) return null;
-  const numId = Number(input);
-  return !isNaN(numId) ? Object.values(data.deletedAccounts).find(e => Number(e.account.id) === numId) || null : data.deletedAccounts[String(input).trim()] || null;
-};
+  return null;
+}
 
-const getUsername = account => {
-  if (!account) return null;
-  return Object.keys(data.accounts).find(k => data.accounts[k] === account) || null;
-};
+function isStaff(role) {
+  return ['moderator', 'admin', 'owner'].includes(role);
+}
 
-const isSelf = (actorId, targetAcc) => Number(actorId) === Number(targetAcc.id);
+// --- Routes ---
 
-// ✅ Fixed: Check owner by ID instead of username
-const isMainOwner = user => {
-  if (!user) return false;
-  const checkId = typeof user === "object" ? Number(user.id) : Number(user);
-  return checkId === OWNER_USER_ID;
-};
-
-const canInteract = (actor, targetAcc) => {
-  if (!actor || !targetAcc) return false;
-  if (isSelf(actor.id, targetAcc)) return false;
-  if (isMainOwner(targetAcc)) return false; // Can never modify ID 1
-  if (isMainOwner(actor)) return true; // ID 1 can modify anyone
-  return RANKS[actor.role] > RANKS[targetAcc.role];
-};
-
-router.get('/role/:userId', (req, res) => {
+// 🔍 Find User (required for ban/role checks)
+router.get('/find-user', async (req, res) => {
   try {
-    const acc = Object.values(data.accounts).find(a => Number(a.id) === Number(req.params.userId));
-    res.json({ success: true, id: Number(req.params.userId), role: acc?.role || "user" });
+    const target = req.query.query;
+    const acc = resolveTarget(target);
+    if (!acc) return res.status(404).json({ success: false, error: "User not found" });
+    res.json({ success: true, user: { id: acc.id, role: acc.role } });
   } catch (err) {
+    console.error("Find user error:", err);
     res.status(500).json({ success: false, error: "Server error" });
   }
 });
 
-router.get('/staff', (req, res) => {
+// 🎭 Get User Role
+router.get('/role/:id', async (req, res) => {
   try {
-    const staff = Object.values(data.accounts).filter(a => ["owner", "admin", "moderator"].includes(a.role)).map(a => ({ 
-      id: Number(a.id), 
-      username: getUsername(a), 
-      role: a.role,
-      banned: a.banned || false
-    }));
-    res.json({ success: true, staff });
+    const userId = Number(req.params.id);
+    const profile = Object.values(data.userProfiles).find(p => Number(p.id) === userId);
+    if (!profile) return res.status(404).json({ success: false, error: "User not found" });
+    res.json({ success: true, role: data.accounts[profile.username]?.role || 'user' });
   } catch (err) {
+    console.error("Get role error:", err);
     res.status(500).json({ success: false, error: "Server error" });
   }
 });
 
-router.post('/set-role', (req, res) => {
+// ✏️ Set User Role
+router.post('/set-role', async (req, res) => {
   try {
     const { actorId, target, role } = req.body;
-    if (!actorId || !target || !role) return res.status(400).json({ success: false, error: "Missing fields" });
-    if (!hasRole(actorId, "admin", data)) return res.status(403).json({ success: false, error: "No permission" });
-    
     const actor = resolveTarget(actorId);
     const targetAcc = resolveTarget(target);
+
     if (!actor || !targetAcc) return res.status(404).json({ success: false, error: "User not found" });
-    if (!canInteract(actor, targetAcc)) return res.status(403).json({ success: false, error: "You cannot modify this account" });
-    
-    // ✅ Prevent removing owner from ID 1 entirely
-    if (Number(targetAcc.id) === OWNER_USER_ID && role !== "owner") {
-      return res.status(403).json({ success: false, error: "Cannot remove owner role from the main account" });
-    }
-    // Prevent removing the last owner
-    if (targetAcc.role === "owner" && role !== "owner") {
-      const ownerCount = Object.values(data.accounts).filter(a => a.role === "owner").length;
-      if (ownerCount <= 1) return res.status(403).json({ success: false, error: "Cannot remove the only owner" });
-    }
+    if (!isStaff(actor.role)) return res.status(403).json({ success: false, error: "Permission denied" });
+    if (targetAcc.id === OWNER_USER_ID && actor.id !== OWNER_USER_ID) return res.status(403).json({ success: false, error: "Cannot change main owner role" });
+    if (role === 'owner' && actor.id !== OWNER_USER_ID) return res.status(403).json({ success: false, error: "Only main owner can assign owner role" });
 
-    const oldRole = targetAcc.role;
-    targetAcc.role = role;
-    const profile = Object.values(data.userProfiles).find(p => Number(p.id) === Number(targetAcc.id));
-    if (profile) profile.role = role;
+    // Update both accounts and profiles
+    data.accounts[targetAcc.username].role = role;
+    data.userProfiles[targetAcc.username].role = role;
+    await saveData();
 
-    data.moderationLogs.push({ 
-      type: "SET_ROLE", 
-      actorId: Number(actorId), 
-      actorName: getUsername(actor), 
-      targetId: Number(targetAcc.id), 
-      targetName: getUsername(targetAcc), 
-      oldRole, 
-      newRole: role, 
-      timestamp: new Date().toISOString() 
-    });
-    
-    saveData();
     res.json({ success: true, message: "Role updated" });
   } catch (err) {
     console.error("Set role error:", err);
@@ -119,32 +81,36 @@ router.post('/set-role', (req, res) => {
   }
 });
 
-router.post('/ban', (req, res) => {
+// 🚫 Ban User
+router.post('/ban', async (req, res) => {
   try {
-    const { actorId, target, reason = "No reason", days = null } = req.body;
-    if (!actorId || !target) return res.status(400).json({ success: false, error: "Missing fields" });
-    if (!hasRole(actorId, "moderator", data)) return res.status(403).json({ success: false, error: "No permission" });
-    
+    const { actorId, target, reason, days } = req.body;
     const actor = resolveTarget(actorId);
     const targetAcc = resolveTarget(target);
+
     if (!actor || !targetAcc) return res.status(404).json({ success: false, error: "User not found" });
-    if (!canInteract(actor, targetAcc)) return res.status(403).json({ success: false, error: "You cannot ban this account" });
+    if (!isStaff(actor.role)) return res.status(403).json({ success: false, error: "Permission denied" });
+    if (targetAcc.id === actor.id) return res.status(400).json({ success: false, error: "Cannot ban yourself" });
+    if (isStaff(targetAcc.role) && actor.id !== OWNER_USER_ID) return res.status(403).json({ success: false, error: "Cannot ban staff members" });
 
-    const banUntil = days ? new Date(Date.now() + days * 86400000).toISOString() : null;
-    Object.assign(targetAcc, { banned: true, banReason: reason, banUntil });
+    const profile = data.userProfiles[targetAcc.username];
+    const expiresAt = days ? new Date(Date.now() + days * 86400000).toISOString() : null;
+    profile.banned = true;
+    profile.banReason = reason;
+    profile.banExpires = expiresAt;
 
-    data.moderationLogs.push({ 
-      type: "BAN", 
-      actorId: Number(actorId), 
-      actorName: getUsername(actor), 
-      targetId: Number(targetAcc.id), 
-      targetName: getUsername(targetAcc), 
-      reason, 
-      banUntil, 
-      timestamp: new Date().toISOString() 
+    // Log action
+    data.moderationLogs.unshift({
+      type: 'BAN',
+      targetId: targetAcc.id,
+      targetName: targetAcc.username,
+      reason,
+      actorId: actor.id,
+      actorName: actor.username,
+      timestamp: new Date().toISOString()
     });
-    
-    saveData();
+
+    await saveData();
     res.json({ success: true, message: "User banned" });
   } catch (err) {
     console.error("Ban error:", err);
@@ -152,29 +118,32 @@ router.post('/ban', (req, res) => {
   }
 });
 
-router.post('/unban', (req, res) => {
+// ✅ Unban User
+router.post('/unban', async (req, res) => {
   try {
     const { actorId, target } = req.body;
-    if (!actorId || !target) return res.status(400).json({ success: false, error: "Missing fields" });
-    if (!hasRole(actorId, "moderator", data)) return res.status(403).json({ success: false, error: "No permission" });
-    
     const actor = resolveTarget(actorId);
     const targetAcc = resolveTarget(target);
+
     if (!actor || !targetAcc) return res.status(404).json({ success: false, error: "User not found" });
-    if (!canInteract(actor, targetAcc)) return res.status(403).json({ success: false, error: "You cannot unban this account" });
+    if (!isStaff(actor.role)) return res.status(403).json({ success: false, error: "Permission denied" });
+    if (targetAcc.id === actor.id) return res.status(400).json({ success: false, error: "Cannot unban yourself" });
 
-    Object.assign(targetAcc, { banned: false, banReason: "", banUntil: null });
+    const profile = data.userProfiles[targetAcc.username];
+    profile.banned = false;
+    delete profile.banReason;
+    delete profile.banExpires;
 
-    data.moderationLogs.push({ 
-      type: "UNBAN", 
-      actorId: Number(actorId), 
-      actorName: getUsername(actor), 
-      targetId: Number(targetAcc.id), 
-      targetName: getUsername(targetAcc), 
-      timestamp: new Date().toISOString() 
+    data.moderationLogs.unshift({
+      type: 'UNBAN',
+      targetId: targetAcc.id,
+      targetName: targetAcc.username,
+      actorId: actor.id,
+      actorName: actor.username,
+      timestamp: new Date().toISOString()
     });
-    
-    saveData();
+
+    await saveData();
     res.json({ success: true, message: "User unbanned" });
   } catch (err) {
     console.error("Unban error:", err);
@@ -182,82 +151,62 @@ router.post('/unban', (req, res) => {
   }
 });
 
-router.post('/delete-account', (req, res) => {
+// 🗑️ Delete / Archive Account
+router.post('/delete-account', async (req, res) => {
   try {
     const { actorId, target } = req.body;
-    if (!actorId || !target) return res.status(400).json({ success: false, error: "Missing fields" });
-    if (!hasRole(actorId, "owner", data)) return res.status(403).json({ success: false, error: "Only owners can delete accounts" });
-    
     const actor = resolveTarget(actorId);
     const targetAcc = resolveTarget(target);
-    if (!actor || !targetAcc) return res.status(404).json({ success: false, error: "Account not found" });
-    if (!canInteract(actor, targetAcc)) return res.status(403).json({ success: false, error: "You cannot delete this account" });
 
-    const username = getUsername(targetAcc);
-    data.deletedAccounts[username] = { 
-      account: { ...targetAcc }, 
-      profile: { ...data.userProfiles[username] || {} }, 
-      registeredName: data.registeredNames[username.toLowerCase()] || null, 
-      idMap: data.usernameToId[username] || null, 
-      deletedAt: new Date().toISOString(), 
-      deletedBy: getUsername(actor) 
+    if (!actor || !targetAcc) return res.status(404).json({ success: false, error: "User not found" });
+    if (actor.id !== OWNER_USER_ID) return res.status(403).json({ success: false, error: "Only main owner can delete accounts" });
+    if (targetAcc.id === actor.id) return res.status(400).json({ success: false, error: "Cannot delete your own account" });
+
+    // Move to deleted archive
+    const profile = data.userProfiles[targetAcc.username];
+    data.deletedAccounts[targetAcc.id] = {
+      ...profile,
+      deletedAt: new Date().toISOString(),
+      deletedBy: actor.id
     };
-    
-    delete data.accounts[username]; 
-    delete data.userProfiles[username]; 
-    delete data.registeredNames[username.toLowerCase()]; 
-    delete data.usernameToId[username];
 
-    data.moderationLogs.push({ 
-      type: "DELETE_ACCOUNT", 
-      actorId: Number(actorId), 
-      actorName: getUsername(actor), 
-      targetId: Number(targetAcc.id), 
-      targetName: username, 
-      timestamp: new Date().toISOString() 
-    });
-    
-    saveData();
-    res.json({ success: true, message: "Account deleted and archived" });
+    // Remove from active data
+    delete data.accounts[targetAcc.username];
+    delete data.userProfiles[targetAcc.username];
+    delete data.usernameToId[targetAcc.username.toLowerCase()];
+
+    await saveData();
+    res.json({ success: true, message: "Account archived" });
   } catch (err) {
     console.error("Delete error:", err);
     res.status(500).json({ success: false, error: "Server error" });
   }
 });
 
-router.post('/recover-account', (req, res) => {
+// ♻️ Recover Archived Account
+router.post('/recover-account', async (req, res) => {
   try {
     const { actorId, target } = req.body;
-    if (!actorId || !target) return res.status(400).json({ success: false, error: "Missing fields" });
-    if (!hasRole(actorId, "owner", data)) return res.status(403).json({ success: false, error: "Only owners can recover accounts" });
-    
-    const deletedEntry = resolveDeletedTarget(target);
-    if (!deletedEntry) return res.status(404).json({ success: false, error: "Deleted account not found" });
-    const username = Object.keys(data.deletedAccounts).find(k => data.deletedAccounts[k] === deletedEntry);
-    if (!username) return res.status(404).json({ success: false, error: "Archive entry not found" });
+    const actor = resolveTarget(actorId);
+    const trimmed = String(target || '').trim();
 
-    if (!deletedEntry.account.joinDate) deletedEntry.account.joinDate = new Date().toISOString();
-    if (deletedEntry.profile) {
-      deletedEntry.profile.joinDate = deletedEntry.profile.joinDate || new Date().toISOString();
-      deletedEntry.profile.gender = deletedEntry.profile.gender || "";
-      deletedEntry.profile.birthday = deletedEntry.profile.birthday || null;
-    }
+    if (!actor || actor.id !== OWNER_USER_ID) return res.status(403).json({ success: false, error: "Only main owner can restore accounts" });
 
-    data.accounts[username] = deletedEntry.account;
-    if (deletedEntry.profile) data.userProfiles[username] = deletedEntry.profile;
-    if (deletedEntry.registeredName) data.registeredNames[username.toLowerCase()] = deletedEntry.registeredName;
-    if (deletedEntry.idMap) data.usernameToId[username] = deletedEntry.idMap;
-    delete data.deletedAccounts[username];
+    // Find deleted account
+    let deleted = null;
+    if (/^\d+$/.test(trimmed)) deleted = data.deletedAccounts[trimmed];
+    else deleted = Object.values(data.deletedAccounts).find(a => a.username.toLowerCase() === trimmed.toLowerCase());
 
-    data.moderationLogs.push({ 
-      type: "RECOVER_ACCOUNT", 
-      actorId: Number(actorId), 
-      actorName: getUsername(resolveTarget(actorId)), 
-      targetId: Number(deletedEntry.account.id), 
-      timestamp: new Date().toISOString() 
-    });
-    
-    saveData();
+    if (!deleted) return res.status(404).json({ success: false, error: "Deleted account not found" });
+
+    // Restore to active data
+    const { deletedAt, deletedBy, ...restored } = deleted;
+    data.userProfiles[restored.username] = restored;
+    data.accounts[restored.username] = { id: restored.id, role: restored.role };
+    data.usernameToId[restored.username.toLowerCase()] = restored.id;
+    delete data.deletedAccounts[restored.id];
+
+    await saveData();
     res.json({ success: true, message: "Account restored" });
   } catch (err) {
     console.error("Recover error:", err);
@@ -265,93 +214,53 @@ router.post('/recover-account', (req, res) => {
   }
 });
 
-router.get('/logs', (req, res) => {
-  try {
-    if (!hasRole(req.query.actorId, "admin", data)) return res.status(403).json({ success: false, error: "No permission" });
-    res.json({ success: true, logs: data.moderationLogs || [] });
-  } catch (err) {
-    res.status(500).json({ success: false, error: "Server error" });
-  }
-});
-
+// 👑 Create New Account (Owner Only)
 router.post('/create-account', async (req, res) => {
   try {
-    const { 
-      actorId, username, password, role = "user", gender = "", birthday = "",
-      customHead, customThumbnail
-    } = req.body;
-
-    if (!actorId || !username || !password || !gender || !birthday) 
-      return res.status(400).json({ success: false, error: "All fields are required" });
-
+    const { actorId, username, password, gender, birthday, role, customHead, customThumbnail } = req.body;
     const actor = resolveTarget(actorId);
-    if (!actor || !isMainOwner(actor)) 
-      return res.status(403).json({ success: false, error: "Access denied — only main owner can create accounts" });
+    const clean = String(username || '').trim();
 
-    const clean = username.trim(), lower = clean.toLowerCase();
-    if (!/^[a-zA-Z0-9_]{3,20}$/.test(clean)) 
-      return res.status(400).json({ success: false, error: "Invalid username — use 3–20 letters, numbers, underscores" });
+    if (!actor || actor.id !== OWNER_USER_ID) return res.status(403).json({ success: false, error: "Only main owner can create accounts" });
+    if (!clean || !password || !gender || !birthday) return res.status(400).json({ success: false, error: "Missing required fields" });
+    if (data.usernameToId[clean.toLowerCase()]) return res.status(400).json({ success: false, error: "Username already taken" });
 
-    if (data.accounts[clean] || data.deletedAccounts[clean] || data.registeredNames[lower]) 
-      return res.status(409).json({ success: false, error: "Username already taken" });
-
-    if (!(password.length >= 8 && /[a-zA-Z]/.test(password) && /[0-9]/.test(password))) 
-      return res.status(400).json({ success: false, error: "Password needs 8+ characters, letters and numbers" });
-
-    const finalRole = ["user", "moderator", "admin", "owner"].includes(role) ? role : "user";
-
-    let newId = data.nextUserId;
-    while (Object.values(data.accounts).some(a => Number(a.id) === newId) || Object.values(data.deletedAccounts).some(d => Number(d.account.id) === newId)) newId++;
-    data.nextUserId = newId + 1;
-
+    // Generate new user ID
+    const newId = data.nextUserId;
+    data.nextUserId += 1;
     const joinDate = new Date().toISOString();
-    const hash = await bcrypt.hash(password, 12);
 
-    const birthdayParts = birthday.split("-");
-    const monthNames = ["January","February","March","April","May","June","July","August","September","October","November","December"];
-    const birthdayObj = {
-      month: monthNames[parseInt(birthdayParts[1]) - 1] || "January",
-      day: parseInt(birthdayParts[2]) || 1,
-      year: parseInt(birthdayParts[0]) || 2000
+    // Hash password
+    const salt = await bcrypt.genSalt(10);
+    const passwordHash = await bcrypt.hash(password, salt);
+
+    // Assign role (force owner for ID 1)
+    const finalRole = Number(newId) === OWNER_USER_ID ? "owner" : (role || "user");
+
+    // Save account data
+    data.accounts[clean] = { id: newId, role: finalRole };
+    data.userProfiles[clean] = {
+      id: newId,
+      username: clean,
+      passwordHash,
+      gender: gender.toLowerCase(),
+      birthday,
+      joinedAt: joinDate,
+      role: finalRole,
+      banned: false
     };
+    data.usernameToId[clean.toLowerCase()] = newId;
 
-    const newAccount = { 
-      id: newId, 
-      hash, 
-      role: finalRole, 
-      banned: false, 
-      banReason: "", 
-      banUntil: null, 
-      joinDate, 
-      theme: "light", 
-      verified: false 
-    };
-
-    const newProfile = { 
-      id: newId, 
-      username: clean, 
-      role: finalRole, 
-      joinDate, 
-      gender: gender.charAt(0).toUpperCase() + gender.slice(1),
-      birthday: birthdayObj,
-      isOnline: false, 
-      lastOnline: null, 
-      createdAt: joinDate 
-    };
-
-    data.accounts[clean] = newAccount;
-    data.userProfiles[clean] = newProfile;
-    data.registeredNames[lower] = clean;
-    data.usernameToId[clean] = newId;
-
+    // 🎨 AVATAR/ OUTFIT LOGIC — EXACTLY AS YOU WANTED!
     if (customHead && customThumbnail) {
+      // ✅ Use custom avatar if both files are uploaded
       const customOutfitId = data.nextOutfitId;
       data.outfitCatalog[customOutfitId] = {
         id: customOutfitId,
         name: `Custom: ${clean}`,
         price: 0,
-        head: customHead.trim(),
-        thumbnail: customThumbnail.trim(),
+        head: `data:image/png;base64,${customHead.trim()}`,
+        thumbnail: `data:image/png;base64,${customThumbnail.trim()}`,
         uploadedBy: OWNER_USER_ID,
         uploadedAt: joinDate,
         sales: 1,
@@ -362,43 +271,50 @@ router.post('/create-account', async (req, res) => {
       if (!data.userOutfits[newId]) data.userOutfits[newId] = { equipped: null, owned: [] };
       data.userOutfits[newId].owned.push(customOutfitId);
       data.userOutfits[newId].equipped = customOutfitId;
+      console.log(`✅ Custom outfit ${customOutfitId} assigned to ${clean}`);
     } else {
-      // ✅ Safe fallback if outfit function fails
-      try {
-        await assignPermanentDefaultOutfit(newId, gender.toLowerCase());
-      } catch (outfitErr) {
-        console.warn("⚠️ Outfit skipped:", outfitErr.message);
-        if (!data.userOutfits[newId]) data.userOutfits[newId] = { equipped: null, owned: [] };
-      }
+      // ✅ RANDOM DEFAULT FOR SELECTED GENDER — male = 1/2, female = 3/4
+      const defaultOutfitId = getDefaultOutfitIdForGender(gender);
+      console.log(`🎲 Picked default outfit ${defaultOutfitId} for ${gender} user ${clean}`);
+
+      if (!data.userOutfits[newId]) data.userOutfits[newId] = { equipped: null, owned: [] };
+      data.userOutfits[newId].owned.push(defaultOutfitId);
+      data.userOutfits[newId].equipped = defaultOutfitId;
     }
 
-    data.moderationLogs.push({ 
-      type: "CREATE_ACCOUNT", 
-      actorId: Number(actorId), 
-      actorName: getUsername(actor), 
-      targetId: newId, 
-      targetName: clean, 
-      role: finalRole, 
-      timestamp: joinDate 
-    });
-
-    // ✅ Match saveData type (remove await if your function is NOT async)
     await saveData();
-    res.json({ success: true, accountId: newId, username: clean, role: finalRole });
+    res.json({ success: true, accountId: newId });
   } catch (err) {
-    console.error("❌ FULL Create Error:", err);
-    res.status(500).json({ success: false, error: "Server error creating account", details: err.message });
+    console.error("Create account error:", err);
+    res.status(500).json({ success: false, error: "Server error creating account" });
   }
 });
 
-// ✅ ADD THIS MISSING ROUTE (your frontend calls it!)
-router.get('/find-user', async (req, res) => {
+// 📋 Staff List
+router.get('/staff', async (req, res) => {
   try {
-    const target = req.query.query;
-    const acc = resolveTarget(target);
-    if (!acc) return res.status(404).json({ success: false, error: "User not found" });
-    res.json({ success: true, user: { id: acc.id, role: acc.role } });
+    const staff = Object.values(data.userProfiles)
+      .filter(p => isStaff(p.role))
+      .map(p => ({
+        id: p.id,
+        username: p.username,
+        role: p.role,
+        banned: p.banned || false
+      }));
+    res.json({ success: true, staff });
   } catch (err) {
+    console.error("Staff list error:", err);
+    res.status(500).json({ success: false, error: "Server error" });
+  }
+});
+
+// 📜 Moderation Logs
+router.get('/logs', async (req, res) => {
+  try {
+    const logs = (data.moderationLogs || []).slice(0, 100); // Last 100 entries
+    res.json({ success: true, logs });
+  } catch (err) {
+    console.error("Logs error:", err);
     res.status(500).json({ success: false, error: "Server error" });
   }
 });
