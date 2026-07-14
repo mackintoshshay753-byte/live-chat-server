@@ -21,7 +21,7 @@ const DEFAULT_DATA = {
   groups: [],
   nextGroupId: 1,
   ads: {},
-  nextOutfitId: 10,
+  nextOutfitId: 11,
   outfitCatalog: { ...DEFAULT_CATALOG },
   userOutfits: {},
 };
