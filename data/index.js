@@ -1,5 +1,5 @@
-const fs = require('fs').promises;
-const { existsSync, renameSync } = require('fs');
+const fs = require('fs').promises; // Switching to async promises
+const { existsSync, renameSync } = require('fs'); // Keep sync only for emergency crash fallback
 const path = require('path');
 
 const DEFAULT_CATALOG = require('./catalogtable');
@@ -21,19 +21,22 @@ const DEFAULT_DATA = {
   groups: [],
   nextGroupId: 1,
   ads: {},
-  nextOutfitId: 6, // Matches your highest catalog ID +1
+  nextOutfitId: 6,
   outfitCatalog: DEFAULT_CATALOG,
   userOutfits: {},
 };
 
+// In-memory data reference
 let data = { ...DEFAULT_DATA };
-const OWNER_USER_ID = 1; // ✅ Owner is fixed to ID 1 forever
+const ACTUAL_OWNER_USERNAME = "sadieandshay87";
 
+// Keep track of ongoing save operations to prevent overlapping writes
 let isSaving = false;
 let savePending = false;
 
 async function loadData() {
   try {
+    // existsSync is fine for initial startup checking
     if (!existsSync(DATA_PATH)) {
       console.log("📄 No data file — starting fresh");
       await saveData();
@@ -43,6 +46,7 @@ async function loadData() {
     const raw = await fs.readFile(DATA_PATH, 'utf8');
     const loaded = JSON.parse(raw);
     
+    // Deep-ish merge to ensure all top-level keys exist
     data = { ...DEFAULT_DATA, ...loaded };
 
     // Sync roles from userProfiles into accounts
@@ -51,25 +55,23 @@ async function loadData() {
       data.accounts[uname].role = prof.role || "user";
     });
 
-    // ✅ Force OWNER role for User ID 1 (always works, even if username changes)
-    const ownerProfile = Object.values(data.userProfiles || {}).find(p => Number(p.id) === OWNER_USER_ID);
-    if (ownerProfile) {
-      if (ownerProfile.role !== "owner") {
-        ownerProfile.role = "owner";
-        if (data.accounts[ownerProfile.username]) {
-          data.accounts[ownerProfile.username].role = "owner";
-        }
+    // Force main owner role
+    if (data.userProfiles[ACTUAL_OWNER_USERNAME]) {
+      if (data.userProfiles[ACTUAL_OWNER_USERNAME].role !== "owner") {
+        data.userProfiles[ACTUAL_OWNER_USERNAME].role = "owner";
+        data.accounts[ACTUAL_OWNER_USERNAME].role = "owner";
         await saveData();
-        console.log(`✅ User ID ${OWNER_USER_ID} set as Owner`);
+        console.log(`✅ ${ACTUAL_OWNER_USERNAME} set as Owner`);
       }
     } else {
-      console.log(`ℹ️ First registered user will get ID ${OWNER_USER_ID} and Owner role`);
+      console.log(`ℹ️ ${ACTUAL_OWNER_USERNAME} will be Owner when registered`);
     }
 
     console.log("✅ Data loaded successfully");
   } catch (err) {
     console.error("⚠️ Data corruption/error detected — backing up and restarting fresh:", err.message);
     
+    // Sync backup fallback since we are handling a catastrophic boot failure
     if (existsSync(DATA_PATH)) {
       renameSync(DATA_PATH, `${DATA_PATH}.bak-${Date.now()}.json`);
     }
@@ -80,6 +82,7 @@ async function loadData() {
 }
 
 async function saveData() {
+  // Queue system: If already saving, flag that we need another save when done
   if (isSaving) {
     savePending = true;
     return;
@@ -89,6 +92,9 @@ async function saveData() {
 
   try {
     const payload = JSON.stringify(data, null, 2);
+    
+    // ATOMIC WRITE: Write to a temp file first, then rename it.
+    // This ensures that if the server crashes mid-write, your actual data file isn't left half-written/corrupted.
     await fs.writeFile(TEMP_DATA_PATH, payload, 'utf8');
     await fs.rename(TEMP_DATA_PATH, DATA_PATH);
   } catch (err) {
@@ -96,6 +102,7 @@ async function saveData() {
   } finally {
     isSaving = false;
     
+    // If a save request came in while we were writing, run it now
     if (savePending) {
       savePending = false;
       await saveData();
@@ -103,16 +110,16 @@ async function saveData() {
   }
 }
 
-// ✅ Assign Owner role to anyone registering with ID 1
-function setRoleOnSignup(userId, role = "user") {
-  return Number(userId) === OWNER_USER_ID ? "owner" : role;
+function setRoleOnSignup(username, role = "user") {
+  return username === ACTUAL_OWNER_USERNAME ? "owner" : role;
 }
 
+// Export a getter/setter function for data so other files don't accidentally break the reference
 module.exports = { 
   get data() { return data; },
   setData: (newData) => { data = newData; },
   loadData, 
   saveData, 
-  setRoleOnSignup,
-  OWNER_USER_ID
+  setRoleOnSignup, 
+  ACTUAL_OWNER_USERNAME 
 };
