@@ -4,64 +4,94 @@ const { Server } = require("socket.io");
 const cors = require("cors");
 const path = require("path");
 const helmet = require("helmet");
-const fs = require("fs");
 
 const app = express();
 const server = http.createServer(app);
 
-// ✅ Use Render's default required port
-const PORT = process.env.PORT || 10000;
+const PORT = process.env.PORT || 3000;
 
-const ALLOWED_ORIGINS = ["https://idontknowww.neocities.org"];
+const ALLOWED_ORIGINS = [
+    "https://idontknowww.neocities.org"
+];
 
-// ---------------- Trust Proxy (REQUIRED for Render) ----------------
+// ---------------- Trust Proxy (REQUIRED for Render — keep this!) ----------------
 app.set("trust proxy", 1);
 
 // ---------------- Security ----------------
-app.use(helmet({
-    contentSecurityPolicy: false,
-    crossOriginResourcePolicy: { policy: "cross-origin" }
-}));
+app.use(
+    helmet({
+        contentSecurityPolicy: false,
+        crossOriginResourcePolicy: { policy: "cross-origin" }
+    })
+);
+
+// CORS headers
+app.use((req, res, next) => {
+    const origin = req.headers.origin;
+
+    if (!origin || ALLOWED_ORIGINS.includes(origin)) {
+        res.setHeader("Access-Control-Allow-Origin", origin || ALLOWED_ORIGINS[0]);
+    }
+
+    res.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+    res.setHeader("Access-Control-Allow-Credentials", "true");
+
+    res.removeHeader("Cross-Origin-Embedder-Policy");
+    res.removeHeader("Cross-Origin-Opener-Policy");
+
+    next();
+});
 
 // ---------------- CORS ----------------
 const corsOptions = {
     origin(origin, callback) {
-        if (!origin || ALLOWED_ORIGINS.includes(origin)) callback(null, true);
-        else callback(new Error("Not allowed by CORS"));
+        if (!origin || ALLOWED_ORIGINS.includes(origin)) {
+            callback(null, true);
+        } else {
+            callback(new Error("Not allowed by CORS"));
+        }
     },
     credentials: true
 };
+
 app.use(cors(corsOptions));
+
+// Express 5 compatible
 app.options(/.*/, cors(corsOptions));
 
 // ---------------- Body Parser ----------------
-app.use(express.json({ limit: "5mb" }));
+app.use(express.json({
+    limit: "5mb"
+}));
 app.use(express.urlencoded({ limit: "5mb", extended: true }));
 
-// ---------------- Static Files (Safe Check) ----------------
-const PUBLIC_PATH = path.join(__dirname, "public");
-if (fs.existsSync(PUBLIC_PATH)) {
-    app.use(express.static(PUBLIC_PATH, {
-        etag: true,
-        maxAge: "1h",
-        immutable: true,
-        setHeaders: res => res.setHeader("Access-Control-Allow-Origin", ALLOWED_ORIGINS[0])
-    }));
-} else {
-    console.log("ℹ️ Public folder not found — static serving skipped");
-}
+// ---------------- Static ----------------
+app.use(express.static(path.join(__dirname, "public"), {
+    etag: true,
+    maxAge: "1h",
+    immutable: true,
+    setHeaders(res) {
+        res.setHeader("Access-Control-Allow-Origin", ALLOWED_ORIGINS[0]);
+    }
+}));
 
 // ---------------- Socket.io ----------------
 const io = new Server(server, {
-    cors: { origin: ALLOWED_ORIGINS, credentials: true },
+    cors: {
+        origin: ALLOWED_ORIGINS,
+        credentials: true
+    },
     transports: ["websocket", "polling"],
     pingInterval: 10000,
     pingTimeout: 15000
 });
 
-// ---------------- Load Data & Sockets ----------------
+// ---------------- Load Data ----------------
 const { loadData } = require("./data");
 loadData();
+
+// ---------------- Sockets ----------------
 require("./sockets")(io);
 
 // ---------------- Routes ----------------
@@ -74,19 +104,29 @@ app.use("/api/chat", require("./routes/chat"));
 app.use("/api/groups", require("./routes/groupsapi"));
 app.use("/api/outfits", require("./routes/outfitsapi"));
 app.use("/api/catalog", require("./routes/catalogapi"));
-app.use("/", require("./routes/pages")); // ✅ Safe now with your fixed pages.js
+app.use("/", require("./routes/pages"));
 
-// ---------------- Error Handling ----------------
-app.use((req, res) => res.status(404).json({ success: false, error: "Route not found" }));
-app.use((err, req, res, next) => {
-    console.error(err);
-    res.status(err.status || 500).json({
+// ---------------- 404 ----------------
+app.use((req, res) => {
+    res.status(404).json({
         success: false,
-        error: process.env.NODE_ENV === "production" ? "Internal Server Error" : err.message
+        error: "Route not found"
     });
 });
 
-// ---------------- Start Server ----------------
+// ---------------- Error Handler ----------------
+app.use((err, req, res, next) => {
+    console.error(err);
+
+    res.status(err.status || 500).json({
+        success: false,
+        error: process.env.NODE_ENV === "production"
+            ? "Internal Server Error"
+            : err.message
+    });
+});
+
+// ---------------- Start ----------------
 server.listen(PORT, "0.0.0.0", () => {
     console.log(`✅ Server running on port ${PORT}`);
 });

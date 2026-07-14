@@ -9,9 +9,9 @@ const DEFAULT_DATA = {
   deletedAccounts: {}, groups: [], nextGroupId: 1, ads: {}, nextOutfitId: 5,
   outfitCatalog: {
     1: { id:1, name:"Default Male", price:0, head:"/images/avatars/head/male.png", thumbnail:"/images/avatars/thumbnail/male.png", uploadedBy:1, uploadedAt:new Date().toISOString(), sales:0, views:0 },
-    2: { id:2, name:"Default Male Alt", price:0, head:"/images/avatars/head/male2.png", thumbnail:"/images/avatars/thumbnail/male_2.png", uploadedBy:1, uploadedAt:new Date().toISOString(), sales:0, views:0 },
+    2: { id:2, name:"Default Male", price:0, head:"/images/avatars/head/male2.png", thumbnail:"/images/avatars/thumbnail/male_2.png", uploadedBy:1, uploadedAt:new Date().toISOString(), sales:0, views:0 },
     3: { id:3, name:"Default Female", price:0, head:"/images/avatars/head/female.png", thumbnail:"/images/avatars/thumbnail/female.png", uploadedBy:1, uploadedAt:new Date().toISOString(), sales:0, views:0 },
-    4: { id:4, name:"Default Female Alt", price:0, head:"/images/avatars/head/female2.png", thumbnail:"/images/avatars/thumbnail/female_2.png", uploadedBy:1, uploadedAt:new Date().toISOString(), sales:0, views:0 }
+    4: { id:4, name:"Default Female", price:0, head:"/images/avatars/head/female2.png", thumbnail:"/images/avatars/thumbnail/female_2.png", uploadedBy:1, uploadedAt:new Date().toISOString(), sales:0, views:0 }
   },
   userOutfits: {}
 };
