@@ -1,11 +1,16 @@
 const express = require('express');
 const router = express.Router();
 const bcrypt = require('bcrypt');
-const { data, saveData, OWNER_USER_ID, getDefaultOutfitIdForGender } = require('../data'); // ✅ Import the gender→outfit function
+const { data, saveData, OWNER_USER_ID } = require('../data'); // ✅ Removed unused import
 const { hasRole } = require('./permissions');
 const { assignPermanentDefaultOutfit } = require('../sockets');
 
 if (!data.deletedAccounts) data.deletedAccounts = {};
+// ✅ Initialize missing required data structures if they don't exist
+if (!data.outfitCatalog) data.outfitCatalog = {};
+if (!data.userOutfits) data.userOutfits = {};
+if (!data.nextOutfitId) data.nextOutfitId = 1;
+if (!data.moderationLogs) data.moderationLogs = [];
 
 const RANKS = { user: 0, moderator: 1, admin: 2, owner: 3 };
 
@@ -270,7 +275,6 @@ router.post('/create-account', async (req, res) => {
       customHead, customThumbnail
     } = req.body;
 
-    // ✅ Fixed: Only require core fields, allow custom avatars to be empty
     if (!actorId || !username || !password || !gender || !birthday) 
       return res.status(400).json({ success: false, error: "All required fields are needed" });
 
@@ -290,7 +294,7 @@ router.post('/create-account', async (req, res) => {
 
     const finalRole = ["user", "moderator", "admin", "owner"].includes(role) ? role : "user";
 
-    let newId = data.nextUserId;
+    let newId = data.nextUserId || 1000; // ✅ Fallback if nextUserId is missing
     while (Object.values(data.accounts).some(a => Number(a.id) === newId) || Object.values(data.deletedAccounts).some(d => Number(d.account.id) === newId)) newId++;
     data.nextUserId = newId + 1;
 
@@ -334,15 +338,15 @@ router.post('/create-account', async (req, res) => {
     data.registeredNames[lower] = clean;
     data.usernameToId[clean] = newId;
 
-    // ✅ Fixed: Accept base64 strings directly, no trim() crash on null
+    // ✅ Safe custom avatar handling
     if (customHead && customThumbnail) {
       const customOutfitId = data.nextOutfitId;
       data.outfitCatalog[customOutfitId] = {
         id: customOutfitId,
         name: `Custom: ${clean}`,
         price: 0,
-        head: customHead, // ✅ Removed .trim() to avoid crash on base64 data
-        thumbnail: customThumbnail, // ✅ Removed .trim()
+        head: customHead,
+        thumbnail: customThumbnail,
         uploadedBy: OWNER_USER_ID,
         uploadedAt: joinDate,
         sales: 1,
@@ -354,8 +358,8 @@ router.post('/create-account', async (req, res) => {
       data.userOutfits[newId].owned.push(customOutfitId);
       data.userOutfits[newId].equipped = customOutfitId;
     } else {
-      // ✅ Ensure default assignment works with the correct gender logic
-      await assignPermanentDefaultOutfit(newId, gender);
+      // ✅ Ensure gender is lowercase for matching your outfit function
+      await assignPermanentDefaultOutfit(newId, gender.toLowerCase());
     }
 
     data.moderationLogs.push({ 
@@ -371,7 +375,7 @@ router.post('/create-account', async (req, res) => {
     await saveData();
     res.json({ success: true, accountId: newId, username: clean, role: finalRole });
   } catch (err) {
-    console.error("❌ Create account full error:", err); // ✅ Log full error for debugging
+    console.error("❌ FULL Create Account Error:", err); // ✅ Shows exact error in console
     res.status(500).json({ success: false, error: "Server error creating account", details: err.message });
   }
 });
