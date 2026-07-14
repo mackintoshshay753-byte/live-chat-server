@@ -21,7 +21,7 @@ const DEFAULT_DATA = {
   groups: [],
   nextGroupId: 1,
   ads: {},
-  nextOutfitId: 8,
+  nextOutfitId: 10,
   outfitCatalog: { ...DEFAULT_CATALOG },
   userOutfits: {},
 };
@@ -32,7 +32,7 @@ const OWNER_USER_ID = 1;
 let isSaving = false;
 let savePending = false;
 
-// 🎲 Strict gender → random variants (CORRECT IDs now!)
+// 🎲 Strict gender → random variants
 function getDefaultOutfitIdForGender(gender) {
   const g = String(gender || '').toLowerCase().trim();
   switch (g) {
@@ -56,7 +56,7 @@ async function loadData() {
     const raw = await fs.readFile(DATA_PATH, 'utf8');
     const loaded = JSON.parse(raw);
     
-    // ✅ Force default catalog entries to never be overwritten by old broken data
+    // ✅ Preserve new fields + never overwrite defaults
     data = {
       ...DEFAULT_DATA,
       ...loaded,

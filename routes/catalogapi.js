@@ -38,7 +38,21 @@ router.get('/:id', (req, res) => {
 });
 
 router.get('/', (req, res) => {
-  const catalog = Object.values(data.outfitCatalog).filter(o => o.id > 4);
+  const { Category, Subcategory } = req.query;
+  let catalog = Object.values(data.outfitCatalog).filter(o => o.id > 4);
+
+  // Filter by main category
+  if (Category && Category !== '1') {
+    catalog = catalog.filter(o => Number(o.category) === Number(Category));
+  }
+
+  // Strict gender filter — only exact matches
+  if (Subcategory === '101') {
+    catalog = catalog.filter(o => o.gender === 'male');
+  } else if (Subcategory === '102') {
+    catalog = catalog.filter(o => o.gender === 'female');
+  }
+
   res.json({ success: true, count: catalog.length, catalog });
 });
 
