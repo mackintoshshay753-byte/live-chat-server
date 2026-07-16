@@ -3,20 +3,8 @@
   "version": "1.0.0",
   "description": "Live chat server for Neocities + Render",
   "main": "server.js",
-  "scripts": {
-    "start": "node server.js"
-  },
-  "keywords": [
-    "chat",
-    "socket.io",
-    "neocities"
-  ],
-  "author": "",
-  "license": "ISC",
-  "type": "commonjs",
-  "engines": {
-    "node": "20.x"
-  },
+  "scripts": { "start": "node server.js" },
+  "engines": { "node": "20.x" },
   "dependencies": {
     "@tensorflow-models/toxicity": "^1.2.2",
     "@tensorflow/tfjs": "^4.22.0",
@@ -34,7 +22,6 @@
     "multer": "^2.1.1",
     "sanitize-html": "^2.13.0",
     "socket.io": "^4.8.3",
-    "socket.io-msgpack-parser": "^3.0.2",
     "uuid": "^10.0.0"
   }
 }

@@ -9,92 +9,67 @@ const app = express();
 const server = http.createServer(app);
 
 const PORT = process.env.PORT || 3000;
+const ALLOWED_ORIGINS = ["https://idontknowww.neocities.org"];
 
-const ALLOWED_ORIGINS = [
-    "https://idontknowww.neocities.org"
-];
-
-// ---------------- Trust Proxy (REQUIRED for Render — keep this!) ----------------
+// Trust proxy — REQUIRED for Render
 app.set("trust proxy", 1);
 
-// ---------------- Security ----------------
-app.use(
-    helmet({
-        contentSecurityPolicy: false,
-        crossOriginResourcePolicy: { policy: "cross-origin" }
-    })
-);
+// Security
+app.use(helmet({
+  contentSecurityPolicy: false,
+  crossOriginResourcePolicy: { policy: "cross-origin" }
+}));
 
-// CORS headers
+// Global CORS
 app.use((req, res, next) => {
-    const origin = req.headers.origin;
-
-    if (!origin || ALLOWED_ORIGINS.includes(origin)) {
-        res.setHeader("Access-Control-Allow-Origin", origin || ALLOWED_ORIGINS[0]);
-    }
-
-    res.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
-    res.setHeader("Access-Control-Allow-Credentials", "true");
-
-    res.removeHeader("Cross-Origin-Embedder-Policy");
-    res.removeHeader("Cross-Origin-Opener-Policy");
-
-    next();
+  const origin = req.headers.origin;
+  if (!origin || ALLOWED_ORIGINS.includes(origin)) {
+    res.setHeader("Access-Control-Allow-Origin", origin || ALLOWED_ORIGINS[0]);
+  }
+  res.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  res.setHeader("Access-Control-Allow-Credentials", "true");
+  res.removeHeader("Cross-Origin-Embedder-Policy");
+  res.removeHeader("Cross-Origin-Opener-Policy");
+  next();
 });
 
-// ---------------- CORS ----------------
+// CORS Middleware
 const corsOptions = {
-    origin(origin, callback) {
-        if (!origin || ALLOWED_ORIGINS.includes(origin)) {
-            callback(null, true);
-        } else {
-            callback(new Error("Not allowed by CORS"));
-        }
-    },
-    credentials: true
+  origin: (origin, cb) => !origin || ALLOWED_ORIGINS.includes(origin) ? cb(null, true) : cb(new Error("Not allowed")),
+  credentials: true
 };
-
 app.use(cors(corsOptions));
-
-// Express 5 compatible
 app.options(/.*/, cors(corsOptions));
 
-// ---------------- Body Parser ----------------
-app.use(express.json({
-    limit: "5mb"
-}));
+// Body Parsers
+app.use(express.json({ limit: "5mb" }));
 app.use(express.urlencoded({ limit: "5mb", extended: true }));
 
-// ---------------- Static ----------------
+// Static Files
 app.use(express.static(path.join(__dirname, "public"), {
-    etag: true,
-    maxAge: "1h",
-    immutable: true,
-    setHeaders(res) {
-        res.setHeader("Access-Control-Allow-Origin", ALLOWED_ORIGINS[0]);
-    }
+  etag: true,
+  maxAge: "1h",
+  immutable: true,
+  setHeaders: res => res.setHeader("Access-Control-Allow-Origin", ALLOWED_ORIGINS[0])
 }));
 
-// ---------------- Socket.io ----------------
+// Socket.IO — FIXED: polling FIRST for Render compatibility
 const io = new Server(server, {
-    cors: {
-        origin: ALLOWED_ORIGINS,
-        credentials: true
-    },
-    transports: ["websocket", "polling"],
-    pingInterval: 10000,
-    pingTimeout: 15000
+  cors: { origin: ALLOWED_ORIGINS, credentials: true },
+  transports: ["polling", "websocket"],
+  pingInterval: 25000,
+  pingTimeout: 60000
 });
 
-// ---------------- Load Data ----------------
+// Load Data
 const { loadData } = require("./data");
 loadData();
 
-// ---------------- Sockets ----------------
+// Socket Handlers
 require("./sockets")(io);
 
-// ---------------- Routes ----------------
+// Routes
 app.use("/api", require("./routes/api"));
 app.use("/api/friends", require("./routes/friendsapi"));
 app.use("/api/messages", require("./routes/messagesapi"));
@@ -106,27 +81,15 @@ app.use("/api/outfits", require("./routes/outfitsapi"));
 app.use("/api/catalog", require("./routes/catalogapi"));
 app.use("/", require("./routes/pages"));
 
-// ---------------- 404 ----------------
-app.use((req, res) => {
-    res.status(404).json({
-        success: false,
-        error: "Route not found"
-    });
-});
-
-// ---------------- Error Handler ----------------
+// Error Pages
+app.use((req, res) => res.status(404).json({ success: false, error: "Route not found" }));
 app.use((err, req, res, next) => {
-    console.error(err);
-
-    res.status(err.status || 500).json({
-        success: false,
-        error: process.env.NODE_ENV === "production"
-            ? "Internal Server Error"
-            : err.message
-    });
+  console.error(err);
+  res.status(err.status || 500).json({
+    success: false,
+    error: process.env.NODE_ENV === "production" ? "Internal Server Error" : err.message
+  });
 });
 
-// ---------------- Start ----------------
-server.listen(PORT, "0.0.0.0", () => {
-    console.log(`✅ Server running on port ${PORT}`);
-});
+// Start Server
+server.listen(PORT, "0.0.0.0", () => console.log(`✅ Server running on port ${PORT}`));

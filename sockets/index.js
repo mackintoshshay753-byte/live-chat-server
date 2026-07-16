@@ -1,6 +1,6 @@
 const bcrypt = require('bcrypt');
-const { data, saveData, getDefaultOutfitIdForGender } = require('../data'); // Import the mapping function
-const { clean, createProfile } = require('../helpers');
+const { data, saveData, getDefaultOutfitIdForGender } = require('./data');
+const { clean, createProfile } = require('./helpers');
 
 const onlineUsers = new Map();
 const loginAttempts = new Map();
@@ -61,14 +61,13 @@ async function assignPermanentDefaultOutfit(userId, gender) {
   userId = Number(userId);
   if (!userId) return;
 
-  // Get random valid ID for this gender
   const chosenOutfitId = getDefaultOutfitIdForGender(gender);
+  if (!chosenOutfitId) return;
 
   if (!data.userOutfits[userId]) {
     data.userOutfits[userId] = { equipped: null, owned: [] };
   }
 
-  // Only assign once — never overwrite later
   if (!data.userOutfits[userId].equipped) {
     if (!data.userOutfits[userId].owned.includes(chosenOutfitId)) {
       data.userOutfits[userId].owned.push(chosenOutfitId);
@@ -78,7 +77,7 @@ async function assignPermanentDefaultOutfit(userId, gender) {
     }
     data.userOutfits[userId].equipped = chosenOutfitId;
     await saveData();
-    console.log(`✅ Assigned ${gender} variant ${chosenOutfitId} to user ${userId}`);
+    console.log(`✅ Assigned ${gender} outfit ${chosenOutfitId} to user ${userId}`);
   }
 }
 
@@ -89,7 +88,7 @@ function setupSockets(io) {
     let currentUserId = null;
     let heartbeatInterval = null;
 
-    console.log(`🔌 User connected | IP: ${clientIp}`);
+    console.log(`🔌 User connected | IP: ${clientIp} | Socket: ${socket.id}`);
 
     const markOnline = (username) => {
       try {
@@ -99,10 +98,7 @@ function setupSockets(io) {
         const profile = data.userProfiles[cleanName];
         if (profile) currentUserId = profile.id;
 
-        for (const [user, sid] of onlineUsers.entries()) {
-          if (sid === socket.id || user === cleanName) onlineUsers.delete(user);
-        }
-
+        onlineUsers.delete(cleanName);
         onlineUsers.set(cleanName, socket.id);
         currentUser = cleanName;
 
@@ -134,11 +130,11 @@ function setupSockets(io) {
     socket.on("disconnect", (reason) => {
       try {
         if (heartbeatInterval) clearInterval(heartbeatInterval);
-        const isTemporary = reason === "ping timeout";
+        const isTemporary = reason === "ping timeout" || reason === "transport close";
 
         if (isTemporary && currentUser) {
-          console.log(`⏱️ ${currentUser} ping timeout — waiting up to 15s for reconnect`);
-          setTimeout(() => {
+          console.log(`⏱️ ${currentUser} temporary disconnect — waiting 15s for reconnect`);
+          setTimeout(async () => {
             if (socket.connected || !currentUser) return;
             if (onlineUsers.get(currentUser) !== socket.id) return;
 
@@ -147,7 +143,7 @@ function setupSockets(io) {
             if (profile) {
               profile.isOnline = false;
               profile.lastOnline = new Date().toISOString();
-              saveData();
+              await saveData();
               io.emit("user-status", { userId: currentUserId, isOnline: false });
             }
             console.log(`👤 ${currentUser} went offline (timeout)`);
@@ -161,7 +157,7 @@ function setupSockets(io) {
           if (profile) {
             profile.lastOnline = new Date().toISOString();
             profile.isOnline = false;
-            saveData();
+            await saveData();
             io.emit("user-status", { userId: currentUserId, isOnline: false });
           }
           console.log(`👤 ${currentUser} went offline | Reason: ${reason} | Total: ${onlineUsers.size}`);
@@ -194,7 +190,7 @@ function setupSockets(io) {
         const account = data.accounts[name];
 
         if (!account || !account.hash || !data.registeredNames[lowerName]) {
-          return safeCb(cb, { message: "Account not found" });
+          return safeCb(cb, { message: "Incorrect username or password" });
         }
 
         if (account.banned === true) {
@@ -211,7 +207,7 @@ function setupSockets(io) {
             account.banned = false;
             account.banReason = "";
             account.banUntil = null;
-            saveData();
+            await saveData();
           }
 
           return safeCb(cb, {
@@ -230,6 +226,11 @@ function setupSockets(io) {
 
         loginAttempts.delete(`${name}:${clientIp}`);
         currentUserId = account.id;
+        currentUser = name;
+
+        heartbeatInterval = setInterval(() => {
+          socket.emit("heartbeat", name);
+        }, 30000);
 
         safeCb(cb, {
           success: true,
@@ -306,33 +307,26 @@ function setupSockets(io) {
         const id = r.user.id;
         data.registeredNames[lower] = true;
         
-        // ✅ Now uses fixed mapping: Male → ID1, Female → ID2
         await assignPermanentDefaultOutfit(id, gender);
         
-        if (data.accounts[name]) {
-          data.accounts[name].joinDate = new Date().toISOString();
-          data.accounts[name].theme = "light";
-          data.accounts[name].verified = false;
-          data.accounts[name].birthday = {
-            month: birthday.month,
-            day: Number(birthday.day),
-            year: Number(birthday.year)
-          };
-          data.accounts[name].gender = gender;
-        }
+        data.accounts[name].joinDate = new Date().toISOString();
+        data.accounts[name].theme = "light";
+        data.accounts[name].verified = false;
+        data.accounts[name].birthday = {
+          month: birthday.month,
+          day: Number(birthday.day),
+          year: Number(birthday.year)
+        };
+        data.accounts[name].gender = gender;
 
-        if (data.userProfiles[name]) {
-          data.userProfiles[name].birthday = {
-            month: birthday.month,
-            day: Number(birthday.day),
-            year: Number(birthday.year)
-          };
-          data.userProfiles[name].gender = gender;
-          data.userProfiles[name].isOnline = false;
-          data.userProfiles[name].lastOnline = null;
-        }
+        data.userProfiles[name].birthday = {
+          month: birthday.month,
+          day: Number(birthday.day),
+          year: Number(birthday.year)
+        };
+        data.userProfiles[name].gender = gender;
 
-        saveData();
+        await saveData();
         safeCb(cb, { success: true, username: name, id, gender });
       } catch (e) {
         console.error("Signup Error:", e);
@@ -408,7 +402,7 @@ function setupSockets(io) {
           changedAt: new Date().toISOString()
         });
 
-        saveData();
+        await saveData();
         io.emit("username updated", { oldName: cleanOld, newName: cleanNew });
         safeCb(cb, { success: true, newName: cleanNew });
 
@@ -440,7 +434,7 @@ function setupSockets(io) {
         }
 
         account.hash = await bcrypt.hash(newPassword, 12);
-        saveData();
+        await saveData();
 
         safeCb(cb, { success: true, message: "Password updated successfully" });
       } catch (err) {
@@ -488,8 +482,8 @@ function setupSockets(io) {
       socket.emit("new-message", message);
 
       const receiverProfile = Object.values(data.userProfiles).find(p => p.id === Number(toId));
-      if (receiverProfile && onlineUsers.has(receiverProfile.username)) {
-        io.to(onlineUsers.get(receiverProfile.username)).emit("new-message", message);
+      if (receiverProfile && onlineUsers.has(receiver.username)) {
+        io.to(onlineUsers.get(receiver.username)).emit("new-message", message);
       }
     });
 
