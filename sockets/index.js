@@ -1,6 +1,6 @@
 const bcrypt = require('bcrypt');
-const { data, saveData, getDefaultOutfitIdForGender } = require('./data');
-const { clean, createProfile } = require('./helpers');
+const { data, saveData, getDefaultOutfitIdForGender } = require('../data');
+const { clean, createProfile } = require('../helpers');
 
 const onlineUsers = new Map();
 const loginAttempts = new Map();
@@ -90,7 +90,8 @@ function setupSockets(io) {
 
     console.log(`🔌 User connected | IP: ${clientIp} | Socket: ${socket.id}`);
 
-    const markOnline = (username) => {
+    // ✅ Added async here
+    const markOnline = async (username) => {
       try {
         const cleanName = sanitizeUsername(username);
         if (!cleanName) return;
@@ -105,7 +106,7 @@ function setupSockets(io) {
         if (profile) {
           profile.lastOnline = new Date().toISOString();
           profile.isOnline = true;
-          saveData();
+          await saveData(); // ✅ Now allowed
           io.emit("user-status", { userId: currentUserId, isOnline: true });
         }
 
@@ -127,13 +128,15 @@ function setupSockets(io) {
       }
     });
 
-    socket.on("disconnect", (reason) => {
+    // ✅ Added async here
+    socket.on("disconnect", async (reason) => {
       try {
         if (heartbeatInterval) clearInterval(heartbeatInterval);
         const isTemporary = reason === "ping timeout" || reason === "transport close";
 
         if (isTemporary && currentUser) {
           console.log(`⏱️ ${currentUser} temporary disconnect — waiting 15s for reconnect`);
+          // ✅ Added async to the timeout callback
           setTimeout(async () => {
             if (socket.connected || !currentUser) return;
             if (onlineUsers.get(currentUser) !== socket.id) return;
@@ -143,7 +146,7 @@ function setupSockets(io) {
             if (profile) {
               profile.isOnline = false;
               profile.lastOnline = new Date().toISOString();
-              await saveData();
+              await saveData(); // ✅ Now allowed
               io.emit("user-status", { userId: currentUserId, isOnline: false });
             }
             console.log(`👤 ${currentUser} went offline (timeout)`);
@@ -157,7 +160,7 @@ function setupSockets(io) {
           if (profile) {
             profile.lastOnline = new Date().toISOString();
             profile.isOnline = false;
-            await saveData();
+            await saveData(); // ✅ Now allowed
             io.emit("user-status", { userId: currentUserId, isOnline: false });
           }
           console.log(`👤 ${currentUser} went offline | Reason: ${reason} | Total: ${onlineUsers.size}`);
