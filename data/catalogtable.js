@@ -14,6 +14,6 @@ module.exports = {
   12: { id: 12, name: "Orchid Denim", price: 0, head: "/images/avatars/catalog/head/orchid-denim.png", thumbnail: "/images/avatars/catalog/thumbnail/orchid_denim.png", uploadedBy: 1, sales: 0, views: 0, category: 13, gender: "female" },
   13: { id: 13, name: "Classic Blue Shirt", price: 0, head: "/images/avatars/catalog/head/blue-shirt.png", thumbnail: "/images/avatars/catalog/thumbnail/blue-shirt-thumb.png", uploadedBy: 1, sales: 0, views: 0, category: 13, gender: "female" },
   14: { id: 14, name: "Classic Blue Shirt", price: 0, head: "/images/avatars/catalog/head/blue-shirt.png", thumbnail: "/images/avatars/catalog/thumbnail/blue-shirt-thumb.png", uploadedBy: 1, sales: 0, views: 0, category: 13, gender: "female" },
-  15: { id: 15, name: "Classic Blue Shirt", price: 0, head: "/images/avatars/catalog/head/blue-shirt.png", thumbnail: "/images/avatars/catalog/thumbnail/blue-shirt-thumb.png", uploadedBy: 1, sales: 0, views: 0, category: 13, gender: "female" },
+  15: { id: 15, name: "Denim Bloom", price: 0, head: "/images/avatars/catalog/head/denim-bloom.png", thumbnail: "/images/avatars/catalog/thumbnail/denim_bloom.png", uploadedBy: 1, sales: 0, views: 0, category: 13, gender: "female" },
   16: { id: 16, name: "Teal Twist", price: 0, head: "/images/avatars/catalog/head/teal-twist.png", thumbnail: "/images/avatars/catalog/thumbnail/teal_twist.png", uploadedBy: 1, sales: 0, views: 0, category: 13, gender: "female" },
 };
